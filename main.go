@@ -1,16 +1,19 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/xuri/excelize/v2"
 )
@@ -24,6 +27,10 @@ var (
 	areaOptions = []string{"CT", "CEIC", "AG", "OUTRO"}
 	headers     = []string{"data", "hora", "resposta", "observacao", "area"}
 )
+
+type JsonConfig struct {
+	DefaultGoal int `json:"Goal"`
+}
 
 type Presence struct {
 	Date        string `json:"data" csv:"data"`
@@ -49,20 +56,47 @@ func (p *Presence) ToSlice() []string {
 
 type AppConfig struct {
 	FolderName  string
-	CsvFilename string
+	Filename    string
 	DefaultGoal int
-	MaxGoal     int
 	ExtraLabel  string
-	CsvHeaders  []string
+	Headers     []string
 }
 
 var config = AppConfig{
 	FolderName:  "Presencial",
-	CsvFilename: "registros1.xlsx",
+	Filename:    "registros1.xlsx",
 	DefaultGoal: 8,
-	MaxGoal:     31,
 	ExtraLabel:  "extra",
-	CsvHeaders:  []string{"data", "hora", "resposta", "observacao", "area"},
+	Headers:     []string{"data", "hora", "resposta", "observacao", "area"},
+}
+
+func saveConfigToJSON(path string, cfg JsonConfig) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("erro ao serializar config.json: %w", err)
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+func loadConfigFromJSON(configPath string) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		log.Printf("Config.json não encontrado ou erro ao ler: %v. Usando valor padrão.", err)
+		return
+	}
+
+	var fileConfig struct {
+		DefaultGoal int `json:"defaultGoal"`
+	}
+
+	if err := json.Unmarshal(data, &fileConfig); err != nil {
+		log.Printf("Erro ao interpretar config.json: %v. Usando padrão.", err)
+		return
+	}
+
+	if fileConfig.DefaultGoal > 0 {
+		config.DefaultGoal = fileConfig.DefaultGoal
+	}
 }
 
 func getPath() string {
@@ -74,7 +108,7 @@ func getPath() string {
 	if err := os.MkdirAll(dataFolder, os.ModePerm); err != nil {
 		log.Fatalf("Erro ao criar pasta: %v", err)
 	}
-	return filepath.Join(dataFolder, config.CsvFilename)
+	return filepath.Join(dataFolder, config.Filename)
 }
 
 func ensureFileExists(path string) {
@@ -85,7 +119,7 @@ func ensureFileExists(path string) {
 
 		sheet := f.GetSheetName(f.GetActiveSheetIndex())
 
-		for i, header := range config.CsvHeaders {
+		for i, header := range config.Headers {
 			cell, err := excelize.CoordinatesToCellName(i+1, 1)
 			if err != nil {
 				log.Fatalf("Erro ao calcular nome da célula: %v", err)
@@ -184,7 +218,7 @@ func loadMonthlyReport(xlsxPath string) string {
 	count := 0
 
 	for i, row := range rows {
-		if i == 0 || len(row) < 3 { // Ignora cabeçalho ou linhas incompletas
+		if i == 0 || len(row) < 3 {
 			continue
 		}
 
@@ -210,7 +244,79 @@ func loadMonthlyReport(xlsxPath string) string {
 	if count == 0 {
 		return "Nenhuma presença registrada este mês."
 	}
-	return header + report
+	return fmt.Sprintf("%s,%s", header, report)
+}
+
+func countMonthlyPresence(xlsxPath string) (int, error) {
+	f, err := excelize.OpenFile(xlsxPath)
+	if err != nil {
+		return 0, fmt.Errorf("falha ao abrir arquivo: %w", err)
+	}
+	defer f.Close()
+
+	sheet := f.GetSheetName(f.GetActiveSheetIndex())
+	rows, err := f.GetRows(sheet)
+	if err != nil {
+		return 0, fmt.Errorf("falha ao ler linhas: %w", err)
+	}
+
+	count := 0
+	now := time.Now()
+	for i, row := range rows {
+		if i == 0 || len(row) < 3 {
+			continue // Skip headers or malformed rows
+		}
+		dateStr, resposta := row[0], row[2]
+		parsedDate, err := time.Parse("02/01/2006", dateStr)
+		if err != nil {
+			continue
+		}
+		if parsedDate.Month() == now.Month() && parsedDate.Year() == now.Year() && resposta == yesReport {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func showConfigForm(app fyne.App, win fyne.Window, configPath string, onComplete func(JsonConfig)) {
+	var defaultGoal int
+
+	entryDefault := widget.NewEntry()
+	entryDefault.SetPlaceHolder("Dias presenciais (ex: 8)")
+
+	entryMax := widget.NewEntry()
+	entryMax.SetPlaceHolder("Limite máximo (ex: 31)")
+
+	saveBtn := widget.NewButton("Salvar", func() {
+		dg, err := strconv.Atoi(entryDefault.Text)
+
+		if err != nil || dg < 1 || dg > 31 {
+			dialog.ShowError(fmt.Errorf("valores inválidos"), win)
+			return
+		}
+
+		cfg := JsonConfig{
+			DefaultGoal: dg,
+		}
+		if err := saveConfigToJSON(configPath, cfg); err != nil {
+			dialog.ShowError(err, win)
+			return
+		}
+
+		dialog.ShowInformation("Salvo", "Configuração salva com sucesso", win)
+		onComplete(cfg)
+	})
+
+	form := container.NewVBox(
+		widget.NewLabel("Primeiro uso - configure os limites de presença:"),
+		entryDefault,
+		entryMax,
+		saveBtn,
+	)
+
+	win.SetContent(form)
+	win.Resize(fyne.NewSize(300, 200))
+	win.Show()
 }
 
 func showAreaPopup(myApp fyne.App, myWin fyne.Window, filePath string, observation string) {
@@ -240,12 +346,13 @@ func showAreaPopup(myApp fyne.App, myWin fyne.Window, filePath string, observati
 		pop.Hide()
 	})
 
-	pop = dialog.NewCustom("Confirmação", "", container.NewVBox(
+	pop = dialog.NewCustomWithoutButtons("Confirmação", container.NewVBox(
 		widget.NewLabel("Confirme a área selecionada:"),
 		selectWidget,
-		container.NewHBox(
-			container.NewCenter(cancelButton),
-			container.NewCenter(acceptButton),
+		container.New(
+			layout.NewGridLayoutWithColumns(2),
+			cancelButton,
+			acceptButton,
 		),
 	), myWin)
 
@@ -265,11 +372,23 @@ func buildMainWindow(myApp fyne.App, filePath string) fyne.Window {
 
 	label := widget.NewLabel("Você está presencial hoje?")
 
-	buttonYes := widget.NewButton("Sim", func() {
+	buttonYes := widget.NewButton("✔ Sim", func() {
+		count, err := countMonthlyPresence(filePath)
+		if err != nil {
+			dialog.ShowError(err, myWin)
+			return
+		}
+		if count >= config.DefaultGoal {
+			dialog.ShowInformation("Meta atingida",
+				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", config.DefaultGoal),
+				myWin,
+			)
+		}
+
 		showAreaPopup(myApp, myWin, filePath, observation)
 	})
 
-	buttonNo := widget.NewButton("Não", func() {
+	buttonNo := widget.NewButton("✖ Não", func() {
 		if err := savePresenceToExcel(filePath, noReport, "", ""); err != nil {
 			dialog.ShowError(err, myWin)
 			return
@@ -278,11 +397,16 @@ func buildMainWindow(myApp fyne.App, filePath string) fyne.Window {
 		myApp.Quit()
 	})
 
+	buttons := container.New(
+		layout.NewGridLayoutWithColumns(2),
+		buttonNo,
+		buttonYes,
+	)
+
 	form := container.NewVBox(
 		reportLabel,
 		label,
-		buttonYes,
-		buttonNo,
+		buttons,
 	)
 
 	myWin.SetContent(form)
@@ -291,74 +415,22 @@ func buildMainWindow(myApp fyne.App, filePath string) fyne.Window {
 
 func main() {
 	myApp := app.New()
+	myWin := myApp.NewWindow("Controle de Presença")
+	myWin.SetFixedSize(true)
 
 	filePath := getPath()
+	configPath := filepath.Join(filepath.Dir(filePath), "config.json")
 	ensureFileExists(filePath)
 
-	myWin := buildMainWindow(myApp, filePath)
-	myWin.ShowAndRun()
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		showConfigForm(myApp, myWin, configPath, func(cfg JsonConfig) {
+			config.DefaultGoal = cfg.DefaultGoal
+			myApp.Quit()
+		})
+	}
 
-	// reportLabel := widget.NewLabel(loadMonthlyReport(filePath))
-	// reportLabel.Wrapping = fyne.TextWrapWord
-	//
-	// observation := ""
-	//
-	// label := widget.NewLabel("Você está presencial hoje?")
-	// buttonYes := widget.NewButton("Sim", func() {
-	// 	newArea := ""
-	// 	selectWidget := widget.NewSelect(areaOptions, func(selected string) {
-	// 		newArea = selected
-	// 	})
-	// 	selectWidget.PlaceHolder = "Selecione novamente..."
-	//
-	// 	var pop dialog.Dialog
-	//
-	// 	acceptButton := widget.NewButton("Aceitar", func() {
-	// 		if newArea == "" {
-	// 			dialog.ShowInformation("Erro", "Você precisa selecionar uma área", myWin)
-	// 			return
-	// 		}
-	//
-	// 		if err := savePresenceToExcel(filePath, yesReport, observation, newArea); err != nil {
-	// 			dialog.ShowError(err, myWin)
-	// 			return
-	// 		}
-	//
-	// 		pop.Hide()
-	// 		dialog.ShowInformation("Salvo", "Presença registrada com sucesso.", myWin)
-	// 		myApp.Quit()
-	// 	})
-	//
-	// 	cancelButton := widget.NewButton("Cancelar", func() {
-	// 		pop.Hide()
-	// 	})
-	//
-	// 	pop = dialog.NewCustom("Confirmação", "", container.NewVBox(
-	// 		widget.NewLabel("Confirme a área selecionada:"),
-	// 		selectWidget,
-	// 		container.NewHBox(cancelButton, acceptButton),
-	// 	), myWin)
-	//
-	// 	pop.Resize(fyne.NewSize(320, 180))
-	// 	pop.Show()
-	// })
-	//
-	// buttonNo := widget.NewButton("Não", func() {
-	// 	if err := savePresenceToExcel(filePath, noReport, "", ""); err != nil {
-	// 		dialog.ShowError(err, myWin)
-	// 		return
-	// 	}
-	// 	dialog.ShowInformation("Informativo", "Tudo bem. Hoje não será contado como presencial.", myWin)
-	// 	myApp.Quit()
-	// })
-	//
-	// form := container.NewVBox(
-	// 	reportLabel,
-	// 	label,
-	// 	buttonYes,
-	// 	buttonNo,
-	// )
-	//
-	// myWin.SetContent(form)
-	// myWin.ShowAndRun()
+	loadConfigFromJSON(configPath)
+
+	myWin = buildMainWindow(myApp, filePath)
+	myWin.ShowAndRun()
 }
