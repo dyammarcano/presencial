@@ -68,7 +68,7 @@ class MessageDialog(DialogWindow):
             self.create_window(title)
             Label(self.window, text=message, padx=20, pady=20, wraplength=350, font=("Courier", 12)).pack()
             btn_text = "OK" if kind != "error" else "Fechar"
-            Button(self.window, text=btn_text, command=self.window.destroy, width=10).pack(pady=10)
+            Button(self.window, text=btn_text, command=self.window.destroy, width=10, font=("Courier", 12)).pack(pady=10)
             self.window.grab_set()
             self.window.wait_window()
         except Exception as e:
@@ -183,16 +183,16 @@ class PresenceManager:
             return self.config.DEFAULT_GOAL
 
 
-def _ask_area_selection() -> Optional[str]:
+def _ask_area_selection_and_save(manager: PresenceManager, observation: str) -> None:
     dialog = DialogWindow()
-    result = [None]
     var = StringVar()
 
     def on_select():
         selected = var.get()
         if selected:
-            result[0] = selected
             dialog.destroy()
+            manager.save_presence(True, observation, selected)
+            MessageDialog().show("Registrado", "Sua resposta foi salva com sucesso.")
         else:
             error_label.config(text="Selecione uma área.", fg="red")
 
@@ -209,14 +209,12 @@ def _ask_area_selection() -> Optional[str]:
         error_label.pack()
 
         Button(dialog.window, text="Confirmar", command=on_select,
-               width=15).pack(pady=10)
+               width=15, font=("Courier", 12)).pack(pady=10)
 
         dialog.window.grab_set()
         dialog.window.wait_window()
-        return result[0]
     except Exception as e:
         logging.error(f"Error in area selection dialog: {str(e)}")
-        return None
 
 
 class PresenceUI:
@@ -250,8 +248,8 @@ class PresenceUI:
             frame = Frame(dialog.window)
             frame.pack(pady=10)
 
-            Button(frame, text="Sim", command=on_yes, width=10).pack(side="left", padx=5)
-            Button(frame, text="Não", command=on_no, width=10).pack(side="right", padx=5)
+            Button(frame, text="Sim", command=on_yes, width=10, font=("Courier", 12)).pack(side="left", padx=5)
+            Button(frame, text="Não", command=on_no, width=10, font=("Courier", 12)).pack(side="right", padx=5)
 
             dialog.window.grab_set()
             dialog.window.wait_window()
@@ -269,13 +267,7 @@ class PresenceUI:
         else:
             observation = ""
 
-        area = _ask_area_selection()
-        if not area:
-            self.message_dialog.show("Erro", "Área inválida. Registro cancelado.", "error")
-            return
-
-        self.manager.save_presence(True, observation, area)
-        self.message_dialog.show("Registrado", "Sua resposta foi salva com sucesso.")
+        _ask_area_selection_and_save(self.manager, observation)
 
     def _handle_absent_response(self) -> None:
         self.manager.save_presence(False)
@@ -308,8 +300,8 @@ class PresenceUI:
             frame = Frame(dialog.window)
             frame.pack(pady=10)
 
-            Button(frame, text="Sim", command=on_yes, width=10).pack(side="left", padx=5)
-            Button(frame, text="Não", command=on_no, width=10).pack(side="right", padx=5)
+            Button(frame, text="Sim", command=on_yes, width=10, font=("Courier", 12)).pack(side="left", padx=5)
+            Button(frame, text="Não", command=on_no, width=10, font=("Courier", 12)).pack(side="right", padx=5)
 
             dialog.window.grab_set()
             dialog.window.wait_window()
