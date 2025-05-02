@@ -1,230 +1,352 @@
 import csv
-import os
-import platform
-import tkinter as tk
+import logging
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
-from tkinter import simpledialog
-from typing import Optional
+from tkinter import Tk, Toplevel, Label, Button, simpledialog, StringVar, Frame
+from tkinter.ttk import Radiobutton
+from typing import Tuple, List, Optional
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='presence_tracker.log'
+)
 
 
-# Funções de interface personalizada
-def show_custom_message(title: str, message: str, kind: str = "info") -> None:
-    window = tk.Toplevel()
-    window.title(title)
-    window.resizable(False, False)
-    window.attributes("-topmost", True)
-    window.geometry("+%d+%d" % (
-        window.winfo_screenwidth() // 2 - 150,
-        window.winfo_screenheight() // 2 - 75
-    ))
-
-    tk.Label(window, text=message, padx=20, pady=20, wraplength=300).pack()
-    btn_text = "OK" if kind != "error" else "Fechar"
-    tk.Button(window, text=btn_text, command=window.destroy, width=10).pack(pady=10)
-    window.grab_set()
-    window.wait_window()
-
-
-def ask_yes_no(title: str, question: str) -> bool:
-    result = [False]  # Default result
-
-    def on_yes():
-        result[0] = True
-        window.destroy()
-
-    def on_no():
-        result[0] = False
-        window.destroy()
-
-    window = tk.Toplevel()
-    window.title(title)
-    window.resizable(False, False)
-    window.attributes("-topmost", True)
-    window.geometry("+%d+%d" % (
-        window.winfo_screenwidth() // 2 - 150,
-        window.winfo_screenheight() // 2 - 75
-    ))
-
-    tk.Label(window, text=question, padx=20, pady=20, wraplength=300).pack()
-    frame = tk.Frame(window)
-    frame.pack(pady=10)
-    tk.Button(frame, text="Sim", command=on_yes, width=10).pack(side="left", padx=5)
-    tk.Button(frame, text="Não", command=on_no, width=10).pack(side="right", padx=5)
-
-    window.grab_set()
-    window.wait_window()
-    return result[0]
-
-
-def ask_area_selection(title: str, prompt: str, options: list[str]) -> Optional[str]:
-    result = [None]
-
-    def on_select():
-        selected = var.get()
-        if selected:
-            result[0] = selected
-            window.destroy()
-        else:
-            error_label.config(text="Selecione uma área.", fg="red")
-
-    window = tk.Toplevel()
-    window.title(title)
-    window.resizable(False, False)
-    window.attributes("-topmost", True)
-    window.geometry("+%d+%d" % (
-        window.winfo_screenwidth() // 2 - 150,
-        window.winfo_screenheight() // 2 - 100
-    ))
-
-    tk.Label(window, text=prompt, padx=20, pady=10).pack()
-    var = tk.StringVar()
-    for opt in options:
-        tk.Radiobutton(window, text=opt, variable=var, value=opt).pack(anchor="w", padx=20)
-
-    error_label = tk.Label(window, text="")
-    error_label.pack()
-
-    tk.Button(window, text="Confirmar", command=on_select, width=15).pack(pady=10)
-    window.grab_set()
-    window.wait_window()
-    return result[0]
-
-
-# Classe principal
-class PresenceTracker:
-    FOLDER_NAME = "Precencial"
-    CSV_FILENAME = "registros.csv"
-    CONFIG_FILENAME = "config.txt"
-    CSV_HEADERS = ["data", "hora", "resposta", "observacao", "area"]
-
+class ResponseType(Enum):
     YES = "Sim"
     NO = "Não"
-    EXTRA = "extra"
 
-    AREAS = ["AG", "CT", "CEIC", "OUTRO"]
 
+class Area(Enum):
+    AG = "AG"
+    CT = "CT"
+    CEIC = "CEIC"
+    OTHER = "OUTRO"
+
+
+@dataclass
+class AppConfig:
+    FOLDER_NAME: str = "Precencial"
+    CSV_FILENAME: str = "registros.csv"
+    CONFIG_FILENAME: str = "config.txt"
+    CSV_HEADERS: List[str] = ("data", "hora", "resposta", "observacao", "area")
+    DEFAULT_GOAL: int = 8
+    MAX_GOAL: int = 31
+    EXTRA_LABEL: str = "extra"
+
+
+class DialogWindow:
     def __init__(self):
+        self.window = None
+
+    def create_window(self, title: str) -> None:
+        self.window = Toplevel()
+        self.window.title(title)
+        self.window.resizable(False, False)
+        self.window.attributes("-topmost", True)
+        self.center_window()
+
+    def center_window(self, width: int = 300, height: int = 150) -> None:
+        screen_width = self.window.winfo_screenwidth()
+        screen_height = self.window.winfo_screenheight()
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+        self.window.geometry(f"+{x}+{y}")
+
+    def destroy(self) -> None:
+        if self.window:
+            self.window.destroy()
+
+
+class MessageDialog(DialogWindow):
+    def show(self, title: str, message: str, kind: str = "info") -> None:
+        try:
+            self.create_window(title)
+            Label(self.window, text=message, padx=20, pady=20, wraplength=300).pack()
+            btn_text = "OK" if kind != "error" else "Fechar"
+            Button(self.window, text=btn_text, command=self.window.destroy, width=10).pack(pady=10)
+            self.window.grab_set()
+            self.window.wait_window()
+        except Exception as e:
+            logging.error(f"Error showing message dialog: {str(e)}")
+            raise
+
+
+class PresenceManager:
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.message_dialog = MessageDialog()
         self.data_folder = self._initialize_data_folder()
-        self.csv_path = self.data_folder / self.CSV_FILENAME
-        self.config_path = self.data_folder / self.CONFIG_FILENAME
+        self.csv_path = self.data_folder / config.CSV_FILENAME
+        self.config_path = self.data_folder / config.CONFIG_FILENAME
         self.monthly_goal = self._load_or_setup_config()
         self._ensure_csv_exists()
 
     def _initialize_data_folder(self) -> Path:
-        base_path = Path(os.environ["USERPROFILE"] if platform.system() == "Windows"
-                         else os.path.expanduser("~"))
-        folder_path = base_path / self.FOLDER_NAME
-        folder_path.mkdir(exist_ok=True)
-        return folder_path
+        try:
+            home = Path.home()
+            folder_path = home / self.config.FOLDER_NAME
+            folder_path.mkdir(exist_ok=True)
+            return folder_path
+        except Exception as e:
+            logging.error(f"Failed to initialize data folder: {str(e)}")
+            raise
 
     def _ensure_csv_exists(self) -> None:
-        if not self.csv_path.exists():
-            with open(self.csv_path, mode='w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(self.CSV_HEADERS)
-
-    def _load_or_setup_config(self) -> int:
-        if self.config_path.exists():
-            with open(self.config_path, "r") as file:
-                try:
-                    return int(file.read().strip())
-                except ValueError:
-                    return 8
-
-        goal = simpledialog.askinteger(
-            "Configuração Inicial",
-            "Quantos dias presenciais por mês você deseja atingir?",
-            minvalue=1, maxvalue=31
-        )
-        if not goal:
-            show_custom_message("Erro", "Valor inválido. Usando valor padrão de 8.", kind="error")
-            goal = 8
-
-        with open(self.config_path, "w") as file:
-            file.write(str(goal))
-        return goal
-
-    def contar_presencas_mes(self) -> tuple[int, list[str]]:
-        atual = datetime.now()
-        total = 0
-        registros = []
         try:
-            with open(self.csv_path, mode='r') as file:
-                reader = csv.DictReader(file)
-                for row in reader:
-                    data = datetime.strptime(row["data"], "%Y-%m-%d")
-                    if data.year == atual.year and data.month == atual.month and row["resposta"] == self.YES:
-                        total += 1
-                        area = row.get('area') or 'N/A'
-                        registros.append(f"* {row['data']} Presencial no\t{area}")
-            return total, registros
-        except (IOError, csv.Error) as e:
-            show_custom_message("Erro", f"Falha ao ler os registros: {str(e)}", kind="error")
-            return 0, []
+            if not self.csv_path.exists():
+                with open(self.csv_path, mode='w', newline='', encoding='utf-8') as file:
+                    writer = csv.writer(file)
+                    writer.writerow(self.config.CSV_HEADERS)
+        except Exception as e:
+            logging.error(f"Failed to create CSV file: {str(e)}")
+            raise
 
-    def salvar_presenca(self, presente: bool, observacao: str = "", area: str = "") -> None:
-        agora = datetime.now()
-        resposta = self.YES if presente else self.NO
+    def save_presence(self, is_present: bool, observation: str = "", area: str = "") -> None:
         try:
-            with open(self.csv_path, mode='a', newline='') as file:
+            now = datetime.now()
+            response = ResponseType.YES.value if is_present else ResponseType.NO.value
+            with open(self.csv_path, mode='a', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
                 writer.writerow([
-                    agora.date(),
-                    agora.strftime("%H:%M:%S"),
-                    resposta,
-                    observacao,
+                    now.date(),
+                    now.strftime("%H:%M:%S"),
+                    response,
+                    observation,
                     area
                 ])
-            show_custom_message("Registrado", "Sua resposta foi salva com sucesso.")
-        except IOError as e:
-            show_custom_message("Erro", f"Falha ao salvar a presença: {str(e)}", kind="error")
+        except Exception as e:
+            logging.error(f"Failed to save presence: {str(e)}")
+            raise
 
-    def perguntar_presenca(self) -> None:
-        total, registros = self.contar_presencas_mes()
+    def count_monthly_presence(self) -> Tuple[int, List[str]]:
+        try:
+            current = datetime.now()
+            total = 0
+            records = []
 
-        resumo = f"Você já marcou presença {total} vez(es) neste mês."
-        if registros:
-            resumo += "\n\n" + "\n".join(registros)
+            with open(self.csv_path, mode='r', encoding='utf-8') as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    date = datetime.strptime(row["data"], "%Y-%m-%d")
+                    if (date.year == current.year and
+                            date.month == current.month and
+                            row["resposta"] == ResponseType.YES.value):
+                        total += 1
+                        area = row.get('area') or 'N/A'
+                        records.append(f"* {row['data']} Presencial no\t{area}")
 
-        show_custom_message("Resumo do mês", resumo)
+            return total, records
+        except Exception as e:
+            logging.error(f"Failed to count monthly presence: {str(e)}")
+            return 0, []
 
-        presente = ask_yes_no("Precencial", "Você está presencial hoje?")
+    def _load_or_setup_config(self) -> int:
+        try:
+            if self.config_path.exists():
+                with open(self.config_path, "r", encoding='utf-8') as file:
+                    try:
+                        value = int(file.read().strip())
+                        if 1 <= value <= self.config.MAX_GOAL:
+                            return value
+                    except ValueError:
+                        logging.warning("Invalid config value found, using default")
+                        return self.config.DEFAULT_GOAL
 
-        if not presente:
-            self.salvar_presenca(False)
-            show_custom_message("Informativo", "Tudo bem. Hoje não será contado como presencial.")
-            return
+            goal = simpledialog.askinteger(
+                "Configuração Inicial",
+                "Quantos dias presenciais por mês você deseja atingir?",
+                minvalue=1,
+                maxvalue=self.config.MAX_GOAL
+            )
 
-        if total >= self.monthly_goal:
-            if not ask_yes_no(
-                    "Meta Atingida",
-                    f"Você já registrou {self.monthly_goal} vezes este mês.\nDeseja registrar mais uma por conta própria?"
-            ):
-                show_custom_message("Encerrado", "Nenhum registro foi adicionado.")
+            if not goal:
+                logging.info("Using default goal value")
+                goal = self.config.DEFAULT_GOAL
+                self.message_dialog.show(
+                    "Erro",
+                    f"Valor inválido. Usando valor padrão de {self.config.DEFAULT_GOAL}.",
+                    "error"
+                )
+
+            with open(self.config_path, "w", encoding='utf-8') as file:
+                file.write(str(goal))
+
+            return goal
+
+        except Exception as e:
+            logging.error(f"Error loading/setting up config: {str(e)}")
+            return self.config.DEFAULT_GOAL
+
+class PresenceUI:
+    def __init__(self, manager: PresenceManager):
+        self.manager = manager
+        self.message_dialog = MessageDialog()
+
+    def _show_summary(self, total: int, records: List[str]) -> None:
+        summary = f"Você já marcou presença {total} vez(es) neste mês."
+        if records:
+            summary += "\n\n" + "\n".join(records)
+        self.message_dialog.show("Resumo do mês", summary)
+
+    def _ask_is_present(self) -> bool:
+        dialog = DialogWindow()
+        result = [False]
+
+        def on_yes():
+            result[0] = True
+            dialog.destroy()
+
+        def on_no():
+            result[0] = False
+            dialog.destroy()
+
+        try:
+            dialog.create_window("Precencial")
+            Label(dialog.window, text="Você está presencial hoje?",
+                  padx=20, pady=20, wraplength=300).pack()
+
+            frame = Frame(dialog.window)
+            frame.pack(pady=10)
+
+            Button(frame, text="Sim", command=on_yes, width=10).pack(side="left", padx=5)
+            Button(frame, text="Não", command=on_no, width=10).pack(side="right", padx=5)
+
+            dialog.window.grab_set()
+            dialog.window.wait_window()
+            return result[0]
+        except Exception as e:
+            logging.error(f"Error in presence question dialog: {str(e)}")
+            return False
+
+    def _handle_present_response(self, total: int) -> None:
+        if total >= self.manager.monthly_goal:
+            if not self._ask_extra_confirmation():
+                self.message_dialog.show("Encerrado", "Nenhum registro foi adicionado.")
                 return
-            observacao = self.EXTRA
+            observation = self.manager.config.EXTRA_LABEL
         else:
-            observacao = ""
+            observation = ""
 
-        area = ask_area_selection("\u00c1rea", f"Em qual área você está hoje?", self.AREAS)
-
+        area = self._ask_area_selection()
         if not area:
-            show_custom_message("Erro", "Área inválida. Registro cancelado.", kind="error")
+            self.message_dialog.show("Erro", "Área inválida. Registro cancelado.", "error")
             return
 
-        self.salvar_presenca(True, observacao, area)
+        self.manager.save_presence(True, observation, area)
+        self.message_dialog.show("Registrado", "Sua resposta foi salva com sucesso.")
+
+    def _handle_absent_response(self) -> None:
+        self.manager.save_presence(False)
+        self.message_dialog.show("Informativo",
+                                 "Tudo bem. Hoje não será contado como presencial.")
+
+    def _ask_extra_confirmation(self) -> bool:
+        return self._ask_yes_no(
+            "Meta Atingida",
+            f"Você já registrou {self.manager.monthly_goal} vezes este mês.\n"
+            f"Deseja registrar mais uma por conta própria?"
+        )
+
+    def _ask_yes_no(self, title: str, question: str) -> bool:
+        dialog = DialogWindow()
+        result = [False]
+
+        def on_yes():
+            result[0] = True
+            dialog.destroy()
+
+        def on_no():
+            result[0] = False
+            dialog.destroy()
+
+        try:
+            dialog.create_window(title)
+            Label(dialog.window, text=question, padx=20, pady=20, wraplength=300).pack()
+
+            frame = Frame(dialog.window)
+            frame.pack(pady=10)
+
+            Button(frame, text="Sim", command=on_yes, width=10).pack(side="left", padx=5)
+            Button(frame, text="Não", command=on_no, width=10).pack(side="right", padx=5)
+
+            dialog.window.grab_set()
+            dialog.window.wait_window()
+            return result[0]
+        except Exception as e:
+            logging.error(f"Error in yes/no dialog: {str(e)}")
+            return False
+
+    def _ask_area_selection(self) -> Optional[str]:
+        dialog = DialogWindow()
+        result = [None]
+        var = StringVar()
+
+        def on_select():
+            selected = var.get()
+            if selected:
+                result[0] = selected
+                dialog.destroy()
+            else:
+                error_label.config(text="Selecione uma área.", fg="red")
+
+        try:
+            dialog.create_window("Área")
+            Label(dialog.window, text="Em qual área você está hoje?",
+                  padx=20, pady=10).pack()
+
+            for area in Area:
+                Radiobutton(dialog.window, text=area.value, variable=var,
+                            value=area.value).pack(anchor="w", padx=20)
+
+            error_label = Label(dialog.window, text="")
+            error_label.pack()
+
+            Button(dialog.window, text="Confirmar", command=on_select,
+                   width=15).pack(pady=10)
+
+            dialog.window.grab_set()
+            dialog.window.wait_window()
+            return result[0]
+        except Exception as e:
+            logging.error(f"Error in area selection dialog: {str(e)}")
+            return None
+
+    def ask_presence(self) -> None:
+        try:
+            total, records = self.manager.count_monthly_presence()
+            self._show_summary(total, records)
+
+            if self._ask_is_present():
+                self._handle_present_response(total)
+            else:
+                self._handle_absent_response()
+        except Exception as e:
+            logging.error(f"Error in presence dialog: {str(e)}")
+            self.message_dialog.show("Erro", str(e), "error")
 
 
-if __name__ == "__main__":
+def main():
     root = None
     try:
-        root = tk.Tk()
+        root = Tk()
         root.withdraw()
-        app = PresenceTracker()
-        app.perguntar_presenca()
+
+        config = AppConfig()
+        manager = PresenceManager(config)
+        ui = PresenceUI(manager)
+        ui.ask_presence()
     except Exception as e:
-        show_custom_message("Erro", f"Ocorreu um erro: {str(e)}", kind="error")
+        logging.error(f"Application error: {str(e)}")
+        MessageDialog().show("Erro", f"Ocorreu um erro: {str(e)}", "error")
     finally:
         if root and root.winfo_exists():
             root.destroy()
+
+
+if __name__ == "__main__":
+    main()
