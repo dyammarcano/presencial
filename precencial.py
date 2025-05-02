@@ -2,70 +2,103 @@ import csv
 import os
 import platform
 from datetime import datetime
+from pathlib import Path
+from typing import Optional
 import tkinter as tk
 from tkinter import messagebox
 
-# Definir caminho da pasta "Precencial" no diretório do usuário
-def obter_pasta_precencial():
-    if platform.system() == "Windows":
-        return os.path.join(os.environ["USERPROFILE"], "Precencial")
-    else:
-        return os.path.join(os.path.expanduser("~"), "Precencial")
 
-pasta_usuario = obter_pasta_precencial()
-os.makedirs(pasta_usuario, exist_ok=True)
+class PresenceTracker:
+    # Configuration constants
+    FOLDER_NAME = "Precencial"
+    CSV_FILENAME = "registros.csv"
+    CSV_HEADERS = ["data", "hora", "resposta", "observacao"]
+    DEFAULT_MONTHLY_GOAL = 8
 
-arquivo_csv = os.path.join(pasta_usuario, "registros.csv")
-meta_mensal = 8
+    # Response constants
+    YES = "Sim"
+    NO = "Não"
+    EXTRA = "extra"
 
-# Criar CSV se não existir
-if not os.path.exists(arquivo_csv):
-    with open(arquivo_csv, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(["data", "hora", "resposta", "observacao"])
+    def __init__(self, monthly_goal: int = DEFAULT_MONTHLY_GOAL):
+        self.monthly_goal = monthly_goal
+        self.data_folder = self._initialize_data_folder()
+        self.csv_path = self.data_folder / self.CSV_FILENAME
+        self._ensure_csv_exists()
 
-# Contar "Sim" do mês atual
-def contar_sim_mes():
-    agora = datetime.now()
-    total = 0
-    with open(arquivo_csv, mode='r') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            data = datetime.strptime(row["data"], "%Y-%m-%d")
-            if data.year == agora.year and data.month == agora.month and row["resposta"] == "Sim":
-                total += 1
-    return total
+    def _initialize_data_folder(self) -> Path:
+        """Initialize and return the data folder path."""
+        base_path = Path(os.environ["USERPROFILE"] if platform.system() == "Windows"
+                         else os.path.expanduser("~"))
+        folder_path = base_path / self.FOLDER_NAME
+        folder_path.mkdir(exist_ok=True)
+        return folder_path
 
-# Salvar resposta no CSV
-def salvar_resposta(resposta, observacao=""):
-    agora = datetime.now()
-    with open(arquivo_csv, mode='a', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow([agora.date(), agora.strftime("%H:%M:%S"), resposta, observacao])
-    messagebox.showinfo("Registrado", "Sua resposta foi registrada com sucesso.")
+    def _ensure_csv_exists(self) -> None:
+        """Create a CSV file with headers if it doesn't exist."""
+        if not self.csv_path.exists():
+            with open(self.csv_path, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(self.CSV_HEADERS)
 
-# Lógica da pergunta
-def perguntar():
-    total_sim = contar_sim_mes()
+    def count_monthly_presence(self) -> int:
+        """Count presence entries for the current month."""
+        current = datetime.now()
+        total = 0
 
-    if total_sim >= meta_mensal:
-        continuar = messagebox.askyesno(
-            "Meta Atingida",
-            f"Você já registrou {meta_mensal} vezes este mês.\nDeseja registrar mais uma por conta própria?"
-        )
-        if continuar:
-            salvar_resposta("Sim", "extra")
-        else:
-            messagebox.showinfo("Tudo certo", "Nenhum registro foi adicionado.")
-        return
+        try:
+            with open(self.csv_path, mode='r') as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    date = datetime.strptime(row["data"], "%Y-%m-%d")
+                    if (date.year == current.year and
+                            date.month == current.month and
+                            row["resposta"] == self.YES):
+                        total += 1
+            return total
+        except (IOError, csv.Error) as e:
+            messagebox.showerror("Error", f"Failed to read presence data: {str(e)}")
+            return 0
 
-    resposta = messagebox.askyesno("Precencial", "Você esta precencial hoje?")
-    if resposta:
-        salvar_resposta("Sim")
-    else:
-        salvar_resposta("Não")
+    def save_presence(self, is_present: bool, observation: str = "") -> None:
+        """Save presence record to CSV file."""
+        current = datetime.now()
+        response = self.YES if is_present else self.NO
 
-# Iniciar sem janela principal
-root = tk.Tk()
-root.withdraw()
-perguntar()
+        try:
+            with open(self.csv_path, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    current.date(),
+                    current.strftime("%H:%M:%S"),
+                    response,
+                    observation
+                ])
+            messagebox.showinfo("Success", "Your response has been recorded.")
+        except IOError as e:
+            messagebox.showerror("Error", f"Failed to save presence: {str(e)}")
+
+    def prompt_presence(self) -> None:
+        """Show presence prompt dialog and handle response."""
+        monthly_count = self.count_monthly_presence()
+
+        if monthly_count >= self.monthly_goal:
+            if messagebox.askyesno(
+                    "Goal Reached",
+                    f"You've already recorded {self.monthly_goal} times this month.\n"
+                    "Would you like to record an extra presence?"
+            ):
+                self.save_presence(True, self.EXTRA)
+            else:
+                messagebox.showinfo("Done", "No record was added.")
+            return
+
+        is_present = messagebox.askyesno("Presence", "Are you present today?")
+        self.save_presence(is_present)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.withdraw()
+    tracker = PresenceTracker()
+    tracker.prompt_presence()
