@@ -1,4 +1,3 @@
-import csv
 import logging
 import shutil
 from dataclasses import dataclass
@@ -8,6 +7,10 @@ from pathlib import Path
 from tkinter import Tk, Toplevel, Label, Button, simpledialog, Frame
 from tkinter.ttk import Radiobutton
 from typing import Tuple, List, Callable
+
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 # Logging configuration
 logging.basicConfig(
@@ -33,9 +36,9 @@ class UIConfig:
 @dataclass
 class AppConfig:
     FOLDER_NAME: str = "Precencial"
-    CSV_FILENAME: str = "registros.csv"
+    EXCEL_FILENAME: str = "registros.xlsx"
     CONFIG_FILENAME: str = "config.txt"
-    CSV_HEADERS: Tuple[str, ...] = ("data", "hora", "resposta", "observacao", "area")
+    EXCEL_HEADERS: Tuple[str, ...] = ("data", "hora", "resposta", "observacao", "area")
     DEFAULT_GOAL: int = 8
     MAX_GOAL: int = 31
     EXTRA_LABEL: str = "extra"
@@ -63,7 +66,6 @@ class BaseDialog:
         self.ui_config = UIConfig()
 
     def create_window(self, title: str) -> None:
-        # Create and configure the dialog window
         self.window = Toplevel()
         self.window.title(title)
         self.window.resizable(False, False)
@@ -73,7 +75,6 @@ class BaseDialog:
         self.frame.pack(pady=10)
 
     def _center_window(self) -> None:
-        # Center the dialog window on the screen
         screen_width = self.window.winfo_screenwidth()
         screen_height = self.window.winfo_screenheight()
         x = (screen_width - self.ui_config.WINDOW_WIDTH) // 2
@@ -81,7 +82,6 @@ class BaseDialog:
         self.window.geometry(f"+{x}+{y}")
 
     def create_label(self, text: str) -> Label:
-        # Return a formatted label widget
         return Label(
             self.window,
             text=text,
@@ -92,7 +92,6 @@ class BaseDialog:
         )
 
     def create_button(self, text: str, command: Callable[[], None]) -> Button:
-        # Return a formatted button widget
         return Button(
             self.window,
             text=text,
@@ -102,7 +101,6 @@ class BaseDialog:
         )
 
     def destroy(self) -> None:
-        # Destroy the window if it exists
         if self.window:
             self.window.destroy()
 
@@ -128,18 +126,16 @@ class PresenceManager:
         self.config = config
         self.message_dialog = MessageDialog()
         self.data_folder = self._initialize_data_folder()
-        self.csv_path = self.data_folder / config.CSV_FILENAME
+        self.excel_path = self.data_folder / config.EXCEL_FILENAME
         self.config_path = self.data_folder / config.CONFIG_FILENAME
         self.monthly_goal = self._load_or_setup_config()
         self._copy_self_to_prevalence()
-        self._ensure_csv_exists()
+        self._ensure_excel_exists()
 
-    # Utility to copy the current script to the Precencial folder
     def _copy_self_to_prevalence(self) -> None:
         try:
             current_file = Path(__file__).resolve()
             destination = self.data_folder / current_file.name
-
             if not destination.exists():
                 shutil.copy(current_file, destination)
                 logging.info(f"Application copied to {destination}")
@@ -154,39 +150,42 @@ class PresenceManager:
         folder_path.mkdir(exist_ok=True)
         return folder_path
 
-    def _ensure_csv_exists(self) -> None:
-        if not self.csv_path.exists():
-            with open(self.csv_path, mode='w', newline='', encoding='utf-8') as file:
-                writer = csv.writer(file)
-                writer.writerow(self.config.CSV_HEADERS)
+    def _ensure_excel_exists(self) -> None:
+        if not self.excel_path.exists():
+            wb = Workbook()
+            ws = wb.active
+            ws.append(self.config.EXCEL_HEADERS)
+            wb.save(self.excel_path)
 
     def save_presence(self, is_present: bool, observation: str = "", area: str = "") -> None:
         now = datetime.now()
         response = ResponseType.YES.value if is_present else ResponseType.NO.value
-        with open(self.csv_path, mode='a', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file)
-            writer.writerow([
-                now.date(),
-                now.strftime("%H:%M:%S"),
-                response,
-                observation,
-                area
-            ])
+        wb = load_workbook(self.excel_path)
+        ws = wb.active
+        ws.append([
+            str(now.date()),
+            now.strftime("%H:%M:%S"),
+            response,
+            observation,
+            area
+        ])
+        wb.save(self.excel_path)
 
     def count_monthly_presence(self) -> Tuple[int, List[str]]:
         current = datetime.now()
         total = 0
         records = []
-        with open(self.csv_path, mode='r', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                date = datetime.strptime(row["data"], "%Y-%m-%d")
-                if (date.year == current.year and
-                        date.month == current.month and
-                        row["resposta"] == ResponseType.YES.value):
+        wb = load_workbook(self.excel_path)
+        ws = wb.active
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            try:
+                date = datetime.strptime(row[0], "%Y-%m-%d")
+                if date.year == current.year and date.month == current.month and row[2] == ResponseType.YES.value:
                     total += 1
-                    area = row.get('area') or 'N/A'
-                    records.append(f"* {row['data']} Presencial no {area.ljust(6)}")
+                    area = row[4] or 'N/A'
+                    records.append(f"* {row[0]} Presencial no {area.ljust(6)}")
+            except Exception as e:
+                logging.warning(f"Error processing row {row}: {e}")
         return total, records
 
     def _load_or_setup_config(self) -> int:
