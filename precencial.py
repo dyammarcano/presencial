@@ -24,6 +24,8 @@ class UIConfig:
     BUTTON_WIDTH: int = 10
     DIALOG_PADDING: int = 20
     WRAP_LENGTH: int = 350
+    WINDOW_WIDTH: int = 300
+    WINDOW_HEIGHT: int = 150
 
 
 # Configuration for app data and thresholds
@@ -56,26 +58,29 @@ class Area(Enum):
 class BaseDialog:
     def __init__(self):
         self.window = None
+        self.frame = None
         self.ui_config = UIConfig()
 
     def create_window(self, title: str) -> None:
-        # Creates the main dialog window and centers it
+        # Create and configure the dialog window
         self.window = Toplevel()
         self.window.title(title)
         self.window.resizable(False, False)
         self.window.attributes("-topmost", True)
         self._center_window()
+        self.frame = Frame(self.window)
+        self.frame.pack(pady=10)
 
     def _center_window(self) -> None:
-        # Centers the dialog window on the screen
+        # Center the dialog window on the screen
         screen_width = self.window.winfo_screenwidth()
         screen_height = self.window.winfo_screenheight()
-        x = (screen_width - 300) // 2
-        y = (screen_height - 150) // 2
+        x = (screen_width - self.ui_config.WINDOW_WIDTH) // 2
+        y = (screen_height - self.ui_config.WINDOW_HEIGHT) // 2
         self.window.geometry(f"+{x}+{y}")
 
     def create_label(self, text: str) -> Label:
-        # Creates a formatted label
+        # Return a formatted label widget
         return Label(
             self.window,
             text=text,
@@ -86,7 +91,7 @@ class BaseDialog:
         )
 
     def create_button(self, text: str, command: Callable[[], None]) -> Button:
-        # Creates a button with the configured appearance
+        # Return a formatted button widget
         return Button(
             self.window,
             text=text,
@@ -96,7 +101,7 @@ class BaseDialog:
         )
 
     def destroy(self) -> None:
-        # Destroys the window if open
+        # Destroy the window if it exists
         if self.window:
             self.window.destroy()
 
@@ -116,7 +121,7 @@ class MessageDialog(BaseDialog):
             raise
 
 
-# Presence manager handles file I/O and config
+# Presence manager handles file I/O and configuration
 class PresenceManager:
     def __init__(self, config: AppConfig):
         self.config = config
@@ -128,21 +133,18 @@ class PresenceManager:
         self._ensure_csv_exists()
 
     def _initialize_data_folder(self) -> Path:
-        # Ensure the data folder exists in the user home directory
         home = Path.home()
         folder_path = home / self.config.FOLDER_NAME
         folder_path.mkdir(exist_ok=True)
         return folder_path
 
     def _ensure_csv_exists(self) -> None:
-        # Create the CSV file with headers if it doesn't exist
         if not self.csv_path.exists():
             with open(self.csv_path, mode='w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
                 writer.writerow(self.config.CSV_HEADERS)
 
     def save_presence(self, is_present: bool, observation: str = "", area: str = "") -> None:
-        # Append a new presence record to the CSV file
         now = datetime.now()
         response = ResponseType.YES.value if is_present else ResponseType.NO.value
         with open(self.csv_path, mode='a', newline='', encoding='utf-8') as file:
@@ -156,7 +158,6 @@ class PresenceManager:
             ])
 
     def count_monthly_presence(self) -> Tuple[int, List[str]]:
-        # Count the number of "Sim" responses in the current month
         current = datetime.now()
         total = 0
         records = []
@@ -173,14 +174,12 @@ class PresenceManager:
         return total, records
 
     def _load_or_setup_config(self) -> int:
-        # Load goal config from file or prompt user if not present
         try:
             if self.config_path.exists():
                 with open(self.config_path, "r", encoding='utf-8') as file:
                     value = int(file.read().strip())
                     if 1 <= value <= self.config.MAX_GOAL:
                         return value
-            # Prompt user for goal if file doesn't exist or is invalid
             goal = simpledialog.askinteger(
                 "Configuração Inicial",
                 "Quantos dias presenciais por mês você deseja atingir?",
@@ -209,13 +208,13 @@ class PresenceUI:
         self.message_dialog = MessageDialog()
 
     def _show_summary(self, total: int, records: List[str]) -> None:
-        # Display summary of presence records for the current month
+        # Display a summary of presence records for the current month
         summary = f"Você já marcou presença {total} vez(es) neste mês."
         if records:
             summary += "\n\n" + "\n".join(records)
         self.message_dialog.show("Resumo do mês", summary)
 
-    def _ask_is_present(self) -> bool:
+    def ask_is_present(self) -> bool:
         # Ask user if they are present today
         dialog = BaseDialog()
         result = [False]
@@ -241,13 +240,13 @@ class PresenceUI:
         return result[0]
 
     def _ask_extra_confirmation(self) -> bool:
-        # Ask user if they want to record extra presence after reaching goal
-        return self._ask_yes_no(
+        # Ask a user if they want to record extra presence after reaching the goal
+        return self.ask_yes_no(
             "Meta Atingida",
             f"Você já registrou {self.manager.monthly_goal} vezes este mês.\nDeseja registrar mais uma por conta própria?"
         )
 
-    def _ask_yes_no(self, title: str, question: str) -> bool:
+    def ask_yes_no(self, title: str, question: str) -> bool:
         # General purpose Yes/No dialog
         dialog = BaseDialog()
         result = [False]
@@ -292,14 +291,12 @@ class PresenceUI:
         dialog.create_label("Em qual área você está hoje?").pack()
 
         for area in Area:
-            Radiobutton(dialog.window, text=area.value, variable=var,
-                        value=area.value).pack(anchor="w", padx=20)
+            Radiobutton(dialog.window, text=area.value, variable=var, value=area.value).pack(anchor="w", padx=20)
 
         error_label = Label(dialog.window, text="", font=("Courier", 12))
         error_label.pack()
 
-        Button(dialog.window, text="Confirmar", command=on_select,
-               width=15, font=("Courier", 12)).pack(pady=10)
+        Button(dialog.window, text="Confirmar", command=on_select, width=15, font=("Courier", 12)).pack(pady=10)
 
         dialog.window.grab_set()
         dialog.window.wait_window()
@@ -309,7 +306,7 @@ class PresenceUI:
         total, records = self.manager.count_monthly_presence()
         self._show_summary(total, records)
 
-        if self._ask_is_present():
+        if self.ask_is_present():
             self._handle_present_response(total)
         else:
             self._handle_absent_response()
