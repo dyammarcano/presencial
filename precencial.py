@@ -66,7 +66,7 @@ class MessageDialog(DialogWindow):
     def show(self, title: str, message: str, kind: str = "info") -> None:
         try:
             self.create_window(title)
-            Label(self.window, text=message, padx=20, pady=20, wraplength=300).pack()
+            Label(self.window, text=message, padx=20, pady=20, wraplength=350, font=("Courier", 12)).pack()
             btn_text = "OK" if kind != "error" else "Fechar"
             Button(self.window, text=btn_text, command=self.window.destroy, width=10).pack(pady=10)
             self.window.grab_set()
@@ -138,7 +138,7 @@ class PresenceManager:
                             row["resposta"] == ResponseType.YES.value):
                         total += 1
                         area = row.get('area') or 'N/A'
-                        records.append(f"* {row['data']} Presencial no\t{area}")
+                        records.append(f"* {row['data']} Presencial no {area.ljust(6)}")
 
             return total, records
         except Exception as e:
@@ -182,6 +182,43 @@ class PresenceManager:
             logging.error(f"Error loading/setting up config: {str(e)}")
             return self.config.DEFAULT_GOAL
 
+
+def _ask_area_selection() -> Optional[str]:
+    dialog = DialogWindow()
+    result = [None]
+    var = StringVar()
+
+    def on_select():
+        selected = var.get()
+        if selected:
+            result[0] = selected
+            dialog.destroy()
+        else:
+            error_label.config(text="Selecione uma área.", fg="red")
+
+    try:
+        dialog.create_window("Área")
+        Label(dialog.window, text="Em qual área você está hoje?",
+              padx=20, pady=10, font=("Courier", 12)).pack()
+
+        for area in Area:
+            Radiobutton(dialog.window, text=area.value, variable=var,
+                        value=area.value).pack(anchor="w", padx=20)
+
+        error_label = Label(dialog.window, text="", font=("Courier", 12))
+        error_label.pack()
+
+        Button(dialog.window, text="Confirmar", command=on_select,
+               width=15).pack(pady=10)
+
+        dialog.window.grab_set()
+        dialog.window.wait_window()
+        return result[0]
+    except Exception as e:
+        logging.error(f"Error in area selection dialog: {str(e)}")
+        return None
+
+
 class PresenceUI:
     def __init__(self, manager: PresenceManager):
         self.manager = manager
@@ -208,7 +245,7 @@ class PresenceUI:
         try:
             dialog.create_window("Precencial")
             Label(dialog.window, text="Você está presencial hoje?",
-                  padx=20, pady=20, wraplength=300).pack()
+                  padx=20, pady=20, wraplength=350, font=("Courier", 12)).pack()
 
             frame = Frame(dialog.window)
             frame.pack(pady=10)
@@ -232,7 +269,7 @@ class PresenceUI:
         else:
             observation = ""
 
-        area = self._ask_area_selection()
+        area = _ask_area_selection()
         if not area:
             self.message_dialog.show("Erro", "Área inválida. Registro cancelado.", "error")
             return
@@ -266,7 +303,7 @@ class PresenceUI:
 
         try:
             dialog.create_window(title)
-            Label(dialog.window, text=question, padx=20, pady=20, wraplength=300).pack()
+            Label(dialog.window, text=question, padx=20, pady=20, wraplength=350, font=("Courier", 12)).pack()
 
             frame = Frame(dialog.window)
             frame.pack(pady=10)
@@ -280,41 +317,6 @@ class PresenceUI:
         except Exception as e:
             logging.error(f"Error in yes/no dialog: {str(e)}")
             return False
-
-    def _ask_area_selection(self) -> Optional[str]:
-        dialog = DialogWindow()
-        result = [None]
-        var = StringVar()
-
-        def on_select():
-            selected = var.get()
-            if selected:
-                result[0] = selected
-                dialog.destroy()
-            else:
-                error_label.config(text="Selecione uma área.", fg="red")
-
-        try:
-            dialog.create_window("Área")
-            Label(dialog.window, text="Em qual área você está hoje?",
-                  padx=20, pady=10).pack()
-
-            for area in Area:
-                Radiobutton(dialog.window, text=area.value, variable=var,
-                            value=area.value).pack(anchor="w", padx=20)
-
-            error_label = Label(dialog.window, text="")
-            error_label.pack()
-
-            Button(dialog.window, text="Confirmar", command=on_select,
-                   width=15).pack(pady=10)
-
-            dialog.window.grab_set()
-            dialog.window.wait_window()
-            return result[0]
-        except Exception as e:
-            logging.error(f"Error in area selection dialog: {str(e)}")
-            return None
 
     def ask_presence(self) -> None:
         try:
