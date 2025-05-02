@@ -1,5 +1,6 @@
 import csv
 import logging
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -42,8 +43,8 @@ class AppConfig:
 
 # Possible responses
 class ResponseType(Enum):
-    YES = "Sim"
-    NO = "Não"
+    YES = "S"
+    NO = "N"
 
 
 # Work areas
@@ -130,7 +131,22 @@ class PresenceManager:
         self.csv_path = self.data_folder / config.CSV_FILENAME
         self.config_path = self.data_folder / config.CONFIG_FILENAME
         self.monthly_goal = self._load_or_setup_config()
+        self._copy_self_to_prevalence()
         self._ensure_csv_exists()
+
+    # Utility to copy the current script to the Precencial folder
+    def _copy_self_to_prevalence(self) -> None:
+        try:
+            current_file = Path(__file__).resolve()
+            destination = self.data_folder / current_file.name
+
+            if not destination.exists():
+                shutil.copy(current_file, destination)
+                logging.info(f"Application copied to {destination}")
+            else:
+                logging.info(f"Application already exists at {destination}")
+        except Exception as e:
+            logging.error(f"Failed to copy application: {e}")
 
     def _initialize_data_folder(self) -> Path:
         home = Path.home()
