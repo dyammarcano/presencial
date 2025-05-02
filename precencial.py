@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from tkinter import Tk, Toplevel, Label, Button, simpledialog, StringVar, Frame
 from tkinter.ttk import Radiobutton
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Callable
 
 # Configure logging
 logging.basicConfig(
@@ -14,6 +14,26 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     filename='presence_tracker.log'
 )
+
+
+@dataclass
+class UIConfig:
+    FONT_FAMILY: str = "Courier"
+    FONT_SIZE: int = 12
+    BUTTON_WIDTH: int = 10
+    DIALOG_PADDING: int = 20
+    WRAP_LENGTH: int = 350
+
+
+@dataclass
+class AppConfig:
+    FOLDER_NAME: str = "Precencial"
+    CSV_FILENAME: str = "registros.csv"
+    CONFIG_FILENAME: str = "config.txt"
+    CSV_HEADERS: Tuple[str, ...] = ("data", "hora", "resposta", "observacao", "area")
+    DEFAULT_GOAL: int = 8
+    MAX_GOAL: int = 31
+    EXTRA_LABEL: str = "extra"
 
 
 class ResponseType(Enum):
@@ -28,47 +48,61 @@ class Area(Enum):
     OTHER = "OUTRO"
 
 
-@dataclass
-class AppConfig:
-    FOLDER_NAME: str = "Precencial"
-    CSV_FILENAME: str = "registros.csv"
-    CONFIG_FILENAME: str = "config.txt"
-    CSV_HEADERS: List[str] = ("data", "hora", "resposta", "observacao", "area")
-    DEFAULT_GOAL: int = 8
-    MAX_GOAL: int = 31
-    EXTRA_LABEL: str = "extra"
-
-
-class DialogWindow:
+class BaseDialog:
     def __init__(self):
         self.window = None
+        self.ui_config = UIConfig()
 
     def create_window(self, title: str) -> None:
+        logging.info(f"Creating window: {title}")
         self.window = Toplevel()
         self.window.title(title)
         self.window.resizable(False, False)
         self.window.attributes("-topmost", True)
-        self.center_window()
+        self._center_window()
 
-    def center_window(self, width: int = 300, height: int = 150) -> None:
+    def _center_window(self) -> None:
         screen_width = self.window.winfo_screenwidth()
         screen_height = self.window.winfo_screenheight()
-        x = (screen_width - width) // 2
-        y = (screen_height - height) // 2
+        x = (screen_width - 300) // 2
+        y = (screen_height - 150) // 2
         self.window.geometry(f"+{x}+{y}")
+
+    def create_label(self, text: str) -> Label:
+        logging.info(f"Creating label with text: {text}")
+        return Label(
+            self.window,
+            text=text,
+            padx=self.ui_config.DIALOG_PADDING,
+            pady=self.ui_config.DIALOG_PADDING,
+            wraplength=self.ui_config.WRAP_LENGTH,
+            font=(self.ui_config.FONT_FAMILY, self.ui_config.FONT_SIZE)
+        )
+
+    def create_button(self, text: str, command: Callable[[], None]) -> Button:
+        logging.info(f"Creating button with text: {text}")
+        return Button(
+            self.window,
+            text=text,
+            command=command,
+            width=self.ui_config.BUTTON_WIDTH,
+            font=(self.ui_config.FONT_FAMILY, self.ui_config.FONT_SIZE)
+        )
 
     def destroy(self) -> None:
         if self.window:
+            logging.info("Destroying window")
             self.window.destroy()
 
 
-class MessageDialog(DialogWindow):
+class MessageDialog(BaseDialog):
     def show(self, title: str, message: str, kind: str = "info") -> None:
         try:
+            logging.info(f"Showing message dialog: {title} - {message}")
             self.create_window(title)
-            Label(self.window, text=message, padx=20, pady=20, wraplength=350, font=("Courier", 12)).pack()
+            self.create_label(message).pack()
             btn_text = "OK" if kind != "error" else "Fechar"
-            Button(self.window, text=btn_text, command=self.window.destroy, width=10, font=("Courier", 12)).pack(pady=10)
+            self.create_button(btn_text, self.window.destroy).pack(pady=10)
             self.window.grab_set()
             self.window.wait_window()
         except Exception as e:
@@ -78,6 +112,7 @@ class MessageDialog(DialogWindow):
 
 class PresenceManager:
     def __init__(self, config: AppConfig):
+        logging.info("Initializing PresenceManager")
         self.config = config
         self.message_dialog = MessageDialog()
         self.data_folder = self._initialize_data_folder()
@@ -88,6 +123,7 @@ class PresenceManager:
 
     def _initialize_data_folder(self) -> Path:
         try:
+            logging.info("Initializing data folder")
             home = Path.home()
             folder_path = home / self.config.FOLDER_NAME
             folder_path.mkdir(exist_ok=True)
@@ -99,6 +135,7 @@ class PresenceManager:
     def _ensure_csv_exists(self) -> None:
         try:
             if not self.csv_path.exists():
+                logging.info("Creating CSV file")
                 with open(self.csv_path, mode='w', newline='', encoding='utf-8') as file:
                     writer = csv.writer(file)
                     writer.writerow(self.config.CSV_HEADERS)
@@ -108,6 +145,7 @@ class PresenceManager:
 
     def save_presence(self, is_present: bool, observation: str = "", area: str = "") -> None:
         try:
+            logging.info("Saving presence")
             now = datetime.now()
             response = ResponseType.YES.value if is_present else ResponseType.NO.value
             with open(self.csv_path, mode='a', newline='', encoding='utf-8') as file:
@@ -125,6 +163,7 @@ class PresenceManager:
 
     def count_monthly_presence(self) -> Tuple[int, List[str]]:
         try:
+            logging.info("Counting monthly presence")
             current = datetime.now()
             total = 0
             records = []
@@ -148,15 +187,12 @@ class PresenceManager:
     def _load_or_setup_config(self) -> int:
         try:
             if self.config_path.exists():
+                logging.info("Loading existing config")
                 with open(self.config_path, "r", encoding='utf-8') as file:
-                    try:
-                        value = int(file.read().strip())
-                        if 1 <= value <= self.config.MAX_GOAL:
-                            return value
-                    except ValueError:
-                        logging.warning("Invalid config value found, using default")
-                        return self.config.DEFAULT_GOAL
-
+                    value = int(file.read().strip())
+                    if 1 <= value <= self.config.MAX_GOAL:
+                        return value
+            logging.info("Setting up new config")
             goal = simpledialog.askinteger(
                 "Configuração Inicial",
                 "Quantos dias presenciais por mês você deseja atingir?",
@@ -183,38 +219,27 @@ class PresenceManager:
             return self.config.DEFAULT_GOAL
 
 
-def _ask_area_selection_and_save(manager: PresenceManager, observation: str) -> None:
-    dialog = DialogWindow()
-    var = StringVar()
+class DialogWindow:
+    def __init__(self):
+        self.window = None
 
-    def on_select():
-        selected = var.get()
-        if selected:
-            dialog.destroy()
-            manager.save_presence(True, observation, selected)
-            MessageDialog().show("Registrado", "Sua resposta foi salva com sucesso.")
-        else:
-            error_label.config(text="Selecione uma área.", fg="red")
+    def create_window(self, title: str) -> None:
+        self.window = Toplevel()
+        self.window.title(title)
+        self.window.resizable(False, False)
+        self.window.attributes("-topmost", True)
+        self.center_window()
 
-    try:
-        dialog.create_window("Área")
-        Label(dialog.window, text="Em qual área você está hoje?",
-              padx=20, pady=10, font=("Courier", 12)).pack()
+    def center_window(self, width: int = 300, height: int = 150) -> None:
+        screen_width = self.window.winfo_screenwidth()
+        screen_height = self.window.winfo_screenheight()
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+        self.window.geometry(f"+{x}+{y}")
 
-        for area in Area:
-            Radiobutton(dialog.window, text=area.value, variable=var,
-                        value=area.value).pack(anchor="w", padx=20)
-
-        error_label = Label(dialog.window, text="", font=("Courier", 12))
-        error_label.pack()
-
-        Button(dialog.window, text="Confirmar", command=on_select,
-               width=15, font=("Courier", 12)).pack(pady=10)
-
-        dialog.window.grab_set()
-        dialog.window.wait_window()
-    except Exception as e:
-        logging.error(f"Error in area selection dialog: {str(e)}")
+    def destroy(self) -> None:
+        if self.window:
+            self.window.destroy()
 
 
 class PresenceUI:
@@ -322,6 +347,40 @@ class PresenceUI:
         except Exception as e:
             logging.error(f"Error in presence dialog: {str(e)}")
             self.message_dialog.show("Erro", str(e), "error")
+
+
+def _ask_area_selection_and_save(manager: PresenceManager, observation: str) -> None:
+    dialog = DialogWindow()
+    var = StringVar()
+
+    def on_select():
+        selected = var.get()
+        if selected:
+            dialog.destroy()
+            manager.save_presence(True, observation, selected)
+            MessageDialog().show("Registrado", "Sua resposta foi salva com sucesso.")
+        else:
+            error_label.config(text="Selecione uma área.", fg="red")
+
+    try:
+        dialog.create_window("Área")
+        Label(dialog.window, text="Em qual área você está hoje?",
+              padx=20, pady=10, font=("Courier", 12)).pack()
+
+        for area in Area:
+            Radiobutton(dialog.window, text=area.value, variable=var,
+                        value=area.value).pack(anchor="w", padx=20)
+
+        error_label = Label(dialog.window, text="", font=("Courier", 12))
+        error_label.pack()
+
+        Button(dialog.window, text="Confirmar", command=on_select,
+               width=15, font=("Courier", 12)).pack(pady=10)
+
+        dialog.window.grab_set()
+        dialog.window.wait_window()
+    except Exception as e:
+        logging.error(f"Error in area selection dialog: {str(e)}")
 
 
 def main():
