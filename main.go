@@ -251,7 +251,10 @@ func showAreaPopup(myApp fyne.App, myWin fyne.Window, cfg *config.AppConfig, obs
 		}
 
 		if err := savePresenceToExcel(cfg.YesReport, observation, newArea, cfg); err != nil {
-			dialog.ShowError(err, myWin)
+			myApp.SendNotification(&fyne.Notification{
+				Title:   "Erro",
+				Content: err.Error(),
+			})
 			return
 		}
 
@@ -293,7 +296,10 @@ func buildMainContent(myApp fyne.App, myWin fyne.Window, cfg *config.AppConfig) 
 	buttonYes := widget.NewButton("✔ Sim", func() {
 		count, err := countMonthlyPresence(cfg)
 		if err != nil {
-			dialog.ShowError(err, myWin)
+			myApp.SendNotification(&fyne.Notification{
+				Title:   "Erro",
+				Content: err.Error(),
+			})
 			return
 		}
 
@@ -357,5 +363,6 @@ func main() {
 	}
 
 	myWin.Resize(fyne.NewSize(400, 250))
+	myWin.CenterOnScreen()
 	myWin.ShowAndRun()
 }
