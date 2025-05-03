@@ -11,7 +11,7 @@ var defaultValues = &AppConfig{
 	FolderName:     "Presencial",
 	ReportFilePath: "registros.xlsx",
 	DefaultGoal:    8,
-	ExtraLabel:     "extra",
+	ExtraLabel:     "adicional",
 	AreaOptions:    []string{"CT", "CEIC", "AG", "OUTRO"},
 	Headers:        []string{"data", "hora", "resposta", "observacao", "area"},
 	YesReport:      "S",

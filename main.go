@@ -153,7 +153,11 @@ func loadMonthlyReport(cfg *config.AppConfig) string {
 		log.Printf("Erro ao abrir arquivo Excel para leitura de relatório: %v", err)
 		return "Erro ao carregar relatório."
 	}
-	defer f.Close()
+	defer func(f *excelize.File) {
+		if err := f.Close(); err != nil {
+			log.Printf("Erro ao fechar arquivo: %v", err)
+		}
+	}(f)
 
 	sheet := f.GetSheetName(f.GetActiveSheetIndex())
 	rows, err := f.GetRows(sheet)
@@ -193,7 +197,7 @@ func loadMonthlyReport(cfg *config.AppConfig) string {
 	if count == 0 {
 		return "Nenhuma presença registrada este mês."
 	}
-	return fmt.Sprintf("%s,%s", header, report)
+	return fmt.Sprintf("%s%s", header, report)
 }
 
 func countMonthlyPresence(cfg *config.AppConfig) (int, error) {
@@ -201,7 +205,11 @@ func countMonthlyPresence(cfg *config.AppConfig) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("falha ao abrir arquivo: %w", err)
 	}
-	defer f.Close()
+	defer func(f *excelize.File) {
+		if err := f.Close(); err != nil {
+			log.Printf("Erro ao fechar arquivo: %v", err)
+		}
+	}(f)
 
 	sheet := f.GetSheetName(f.GetActiveSheetIndex())
 	rows, err := f.GetRows(sheet)
@@ -282,11 +290,19 @@ func buildMainContent(myApp fyne.App, myWin fyne.Window, cfg *config.AppConfig) 
 			dialog.ShowError(err, myWin)
 			return
 		}
+
 		if count >= cfg.DefaultGoal {
-			dialog.ShowInformation("Meta atingida",
+			info := dialog.NewInformation("Meta atingida",
 				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", cfg.DefaultGoal),
 				myWin,
 			)
+
+			info.SetOnClosed(func() {
+				showAreaPopup(myApp, myWin, cfg, observation)
+			})
+
+			info.Show()
+			return
 		}
 		showAreaPopup(myApp, myWin, cfg, observation)
 	})
