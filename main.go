@@ -257,11 +257,11 @@ func showAreaPopup(myApp fyne.App, myWin fyne.Window, cfg *config.AppConfig, obs
 
 		pop.Hide()
 
-		info := dialog.NewInformation("Salvo", "Presença registrada com sucesso.", myWin)
-		info.SetOnClosed(func() {
-			myApp.Quit()
+		myApp.SendNotification(&fyne.Notification{
+			Title:   "Salvo",
+			Content: "Presença registrada com sucesso.",
 		})
-		info.Show()
+		myApp.Quit()
 	})
 
 	cancelButton := widget.NewButton("✖ Cancelar", func() {
@@ -314,11 +314,11 @@ func buildMainContent(myApp fyne.App, myWin fyne.Window, cfg *config.AppConfig) 
 	})
 
 	buttonNo := widget.NewButton("✖ Não", func() {
-		info := dialog.NewInformation("Informativo", "Tudo bem. Hoje não será contado como presencial.", myWin)
-		info.SetOnClosed(func() {
-			myApp.Quit()
+		myApp.SendNotification(&fyne.Notification{
+			Title:   "Informativo",
+			Content: "Tudo bem. Hoje não será contado como presencial.",
 		})
-		info.Show()
+		myApp.Quit()
 	})
 
 	buttons := container.New(
