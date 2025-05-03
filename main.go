@@ -249,13 +249,19 @@ func showAreaPopup(myApp fyne.App, myWin fyne.Window, cfg *config.AppConfig, obs
 			dialog.ShowInformation("Erro", "Você precisa selecionar uma área", myWin)
 			return
 		}
+
 		if err := savePresenceToExcel(cfg.YesReport, observation, newArea, cfg); err != nil {
 			dialog.ShowError(err, myWin)
 			return
 		}
+
 		pop.Hide()
-		dialog.ShowInformation("Salvo", "Presença registrada com sucesso.", myWin)
-		myApp.Quit()
+
+		info := dialog.NewInformation("Salvo", "Presença registrada com sucesso.", myWin)
+		info.SetOnClosed(func() {
+			myApp.Quit()
+		})
+		info.Show()
 	})
 
 	cancelButton := widget.NewButton("✖ Cancelar", func() {
@@ -308,12 +314,11 @@ func buildMainContent(myApp fyne.App, myWin fyne.Window, cfg *config.AppConfig) 
 	})
 
 	buttonNo := widget.NewButton("✖ Não", func() {
-		if err := savePresenceToExcel(cfg.NoReport, "", "", cfg); err != nil {
-			dialog.ShowError(err, myWin)
-			return
-		}
-		dialog.ShowInformation("Informativo", "Tudo bem. Hoje não será contado como presencial.", myWin)
-		myApp.Quit()
+		info := dialog.NewInformation("Informativo", "Tudo bem. Hoje não será contado como presencial.", myWin)
+		info.SetOnClosed(func() {
+			myApp.Quit()
+		})
+		info.Show()
 	})
 
 	buttons := container.New(
