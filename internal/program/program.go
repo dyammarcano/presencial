@@ -35,16 +35,16 @@ type MainApp struct {
 	firstRun bool
 
 	*model.App
-	*model.AppConfig
 	records []model.PresenceRecord
 }
 
 func NewMainApp(appName string) (*MainApp, error) {
 	a := &MainApp{
-		app:       theme.NewSmallFontTheme(app.New()),
-		App:       &model.App{},
-		AppConfig: &model.AppConfig{},
-		records:   []model.PresenceRecord{},
+		app: theme.NewSmallFontTheme(app.New()),
+		App: &model.App{
+			Config: model.AppConfig{},
+		},
+		records: []model.PresenceRecord{},
 	}
 
 	if err := a.setupDatabase(appName); err != nil {
@@ -159,30 +159,11 @@ func (m *MainApp) loadConfigFromDB() error {
 		}
 	}
 
-	type arr struct {
-		ValuesArea    []string `json:"areas"`
-		ValuesHeaders []string `json:"headers"`
-	}
-
-	var area arr
-	_ = json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area)
-
-	if err := json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area); err != nil {
-		return fmt.Errorf("erro ao interpretar AreaOptions: %w", err)
-	}
-
-	var head arr
-	if err := json.Unmarshal([]byte(m.App.Interaction.Headers), &head); err != nil {
-		return fmt.Errorf("erro ao interpretar HeadersOptions: %w", err)
-	}
-
-	m.AppConfig = &model.AppConfig{
+	m.App.Config = model.AppConfig{
 		DefaultGoal: m.App.Report.DefaultGoal,
 		YesReport:   m.App.Report.YesReport,
 		NoReport:    m.App.Report.NoReport,
 		ExtraLabel:  m.App.Interaction.ExtraLabel,
-		AreaOptions: area.ValuesArea,
-		Headers:     head.ValuesHeaders,
 	}
 
 	return nil
@@ -197,9 +178,9 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 	label := widget.NewLabel("Você está presencial hoje?")
 
 	buttonYes := widget.NewButton("✔ Sim", func() {
-		if len(m.records) >= m.DefaultGoal {
+		if len(m.records) >= m.App.Config.DefaultGoal {
 			info := dialog.NewInformation("Meta atingida",
-				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", m.DefaultGoal), m.win,
+				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", m.App.Config.DefaultGoal), m.win,
 			)
 
 			info.SetOnClosed(func() {
@@ -237,7 +218,11 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 
 func (m *MainApp) showAreaPopup(observation string) {
 	newArea := ""
-	selectWidget := widget.NewSelect(m.AreaOptions, func(selected string) { newArea = selected })
+
+	var area model.Arr
+	_ = json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area)
+
+	selectWidget := widget.NewSelect(area.ValuesArea, func(selected string) { newArea = selected })
 	selectWidget.PlaceHolder = "Selecione a área"
 
 	var pop dialog.Dialog
@@ -335,7 +320,7 @@ func (m *MainApp) showConfigForm(onComplete func()) {
 			return
 		}
 
-		m.DefaultGoal = dg
+		m.App.Config.DefaultGoal = dg
 
 		if err := m.db.Preload("Report").Where("app_id = ?", m.AppID).First(&m.App).Error; err != nil {
 			dialog.ShowError(fmt.Errorf("erro ao buscar a: %w", err), m.win)
@@ -442,7 +427,7 @@ func (m *MainApp) loadMonthlyReport() string {
 
 		var prefix string
 		switch {
-		case i < m.DefaultGoal:
+		case i < m.App.Config.DefaultGoal:
 			prefix = "☑️"
 		default:
 			prefix = "✅"
@@ -451,7 +436,7 @@ func (m *MainApp) loadMonthlyReport() string {
 		report += fmt.Sprintf("%s %s - %s\n", prefix, t.Format(layoutBR), r.Area)
 	}
 
-	for i := len(m.records); i < m.DefaultGoal; i++ {
+	for i := len(m.records); i < m.App.Config.DefaultGoal; i++ {
 		report += "🔲 (pendente)\n"
 	}
 
