@@ -23,6 +23,9 @@ import (
 	"gorm.io/gorm"
 )
 
+const layoutISO = "2006-01-02"
+const layoutBR = "02/01/2006"
+
 type MainApp struct {
 	db *gorm.DB
 
@@ -33,11 +36,15 @@ type MainApp struct {
 
 	*model.App
 	*model.AppConfig
+	records []model.PresenceRecord
 }
 
 func NewMainApp(appName string) (*MainApp, error) {
 	a := &MainApp{
-		app: theme.NewSmallFontTheme(app.New()),
+		app:       theme.NewSmallFontTheme(app.New()),
+		App:       &model.App{},
+		AppConfig: &model.AppConfig{},
+		records:   []model.PresenceRecord{},
 	}
 
 	if err := a.setupDatabase(appName); err != nil {
@@ -127,40 +134,55 @@ func (m *MainApp) initApp() error {
 }
 
 func (m *MainApp) loadConfigFromDB() error {
-	var app model.App
-	if err := m.db.Preload("Language").Preload("Interaction").Preload("Report").First(&app).Error; err != nil {
-		return fmt.Errorf("erro ao carregar configuração do app: %v", err)
+	if err := m.db.
+		Preload("Language").
+		Preload("Interaction").
+		Preload("Report").
+		First(&m.App).Error; err != nil {
+		return fmt.Errorf("erro ao carregar dados do app: %w", err)
 	}
 
-	m.App = &app
+	var allRecords []model.PresenceRecord
+	if err := m.db.Order("date DESC, time DESC").Find(&allRecords).Error; err != nil {
+		log.Printf("erro ao carregar registros anteriores: %v", err)
+	}
+
+	now := time.Now()
+	for _, r := range allRecords {
+		t, err := time.Parse(layoutISO, r.Date)
+		if err != nil {
+			continue
+		}
+
+		if t.Month() == now.Month() && t.Year() == now.Year() {
+			m.records = append(m.records, r)
+		}
+	}
 
 	type arr struct {
-		Values []string `json:"areas"`
+		ValuesArea    []string `json:"areas"`
+		ValuesHeaders []string `json:"headers"`
 	}
 
 	var area arr
-	_ = json.Unmarshal([]byte(app.Interaction.AreaOptions), &area)
+	_ = json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area)
 
-	if err := json.Unmarshal([]byte(app.Interaction.AreaOptions), &area); err != nil {
+	if err := json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area); err != nil {
 		return fmt.Errorf("erro ao interpretar AreaOptions: %w", err)
 	}
 
 	var head arr
-	if err := json.Unmarshal([]byte(app.Interaction.Headers), &head); err != nil {
+	if err := json.Unmarshal([]byte(m.App.Interaction.Headers), &head); err != nil {
 		return fmt.Errorf("erro ao interpretar HeadersOptions: %w", err)
 	}
 
 	m.AppConfig = &model.AppConfig{
-
-		AppID:          app.AppID,
-		FolderName:     "Presencial",
-		ReportFilePath: "",
-		DefaultGoal:    app.Report.DefaultGoal,
-		YesReport:      app.Report.YesReport,
-		NoReport:       app.Report.NoReport,
-		ExtraLabel:     app.Interaction.ExtraLabel,
-		AreaOptions:    area.Values,
-		Headers:        head.Values,
+		DefaultGoal: m.App.Report.DefaultGoal,
+		YesReport:   m.App.Report.YesReport,
+		NoReport:    m.App.Report.NoReport,
+		ExtraLabel:  m.App.Interaction.ExtraLabel,
+		AreaOptions: area.ValuesArea,
+		Headers:     head.ValuesHeaders,
 	}
 
 	return nil
@@ -175,16 +197,7 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 	label := widget.NewLabel("Você está presencial hoje?")
 
 	buttonYes := widget.NewButton("✔ Sim", func() {
-		count, err := m.countMonthlyPresence()
-		if err != nil {
-			m.app.SendNotification(&fyne.Notification{
-				Title:   "Erro",
-				Content: err.Error(),
-			})
-			return
-		}
-
-		if count >= m.DefaultGoal {
+		if len(m.records) >= m.DefaultGoal {
 			info := dialog.NewInformation("Meta atingida",
 				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", m.DefaultGoal), m.win,
 			)
@@ -222,13 +235,6 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 	return form
 }
 
-func (m *MainApp) countMonthlyPresence() (int, error) {
-	now := time.Now()
-	var count int
-	err := m.db.Raw("SELECT COUNT(*) FROM presence_records WHERE strftime('%m', date) = ? AND strftime('%Y', date) = ? AND response = ?", now.Format("01"), now.Format("2006"), m.Language.Yes).Scan(&count).Error
-	return count, err
-}
-
 func (m *MainApp) showAreaPopup(observation string) {
 	newArea := ""
 	selectWidget := widget.NewSelect(m.AreaOptions, func(selected string) { newArea = selected })
@@ -247,6 +253,7 @@ func (m *MainApp) showAreaPopup(observation string) {
 				Title:   "Erro",
 				Content: err.Error(),
 			})
+			<-time.After(10 * time.Millisecond)
 			return
 		}
 
@@ -256,6 +263,7 @@ func (m *MainApp) showAreaPopup(observation string) {
 			Title:   "Salvo",
 			Content: "Presença registrada com sucesso.",
 		})
+		<-time.After(10 * time.Millisecond)
 		m.app.Quit()
 	})
 
@@ -278,8 +286,9 @@ func (m *MainApp) showAreaPopup(observation string) {
 }
 
 func (m *MainApp) savePresenceToDB(presence *model.PresenceRecord) error {
-	query := fmt.Sprintf("INSERT INTO presence_records (date, time, response, observation, area) VALUES (?, ?, ?, ?, ?)")
-	return m.db.Exec(query, time.Now().Format("02/01/2006"), time.Now().Format("15:04:05"), presence.Response, presence.Observation, presence.Area).Error
+	presence.Date = time.Now().Format(layoutISO)
+	presence.Time = time.Now().Format("15:04:05")
+	return m.db.Create(presence).Error
 }
 
 func (m *MainApp) buildMainMenu() {
@@ -293,8 +302,10 @@ func (m *MainApp) buildMainMenu() {
 	)
 
 	editMenu := fyne.NewMenu("Editar",
-		fyne.NewMenuItem("Configuração", func() {
-			dialog.ShowInformation("Configuração", "Função de configuração futura", m.win)
+		fyne.NewMenuItem("Configurar Meta de Dias", func() {
+			m.showConfigForm(func() {
+				m.win.SetContent(m.buildMainContent())
+			})
 		}),
 	)
 
@@ -326,13 +337,13 @@ func (m *MainApp) showConfigForm(onComplete func()) {
 
 		m.DefaultGoal = dg
 
-		var app model.App
-		if err := m.db.Preload("Report").Where("app_id = ?", m.ID).First(&app).Error; err != nil {
-			dialog.ShowError(fmt.Errorf("erro ao buscar app: %w", err), m.win)
+		if err := m.db.Preload("Report").Where("app_id = ?", m.AppID).First(&m.App).Error; err != nil {
+			dialog.ShowError(fmt.Errorf("erro ao buscar a: %w", err), m.win)
 			return
 		}
-		app.Report.DefaultGoal = dg
-		if err := m.db.Save(&app.Report).Error; err != nil {
+
+		m.Report.DefaultGoal = dg
+		if err := m.db.Save(&m.Report).Error; err != nil {
 			dialog.ShowError(fmt.Errorf("erro ao salvar config: %w", err), m.win)
 			return
 		}
@@ -359,7 +370,7 @@ func (m *MainApp) createDefaultApp() error {
 		return nil
 	}
 
-	modelLang := model.AppLanguage{
+	m.App.Language = model.AppLanguage{
 		WindowName:  "Controle de Presença",
 		Title:       "Controle de Presença",
 		Welcome:     "Bem-vindo",
@@ -381,63 +392,70 @@ func (m *MainApp) createDefaultApp() error {
 		Info:        "Informação",
 	}
 
-	if err := m.db.Create(&modelLang).Error; err != nil {
+	if err := m.db.Create(&m.App.Language).Error; err != nil {
 		return err
 	}
 
-	modelInteract := model.AppInteraction{
+	m.App.Interaction = model.AppInteraction{
 		ExtraLabel:  "adicional",
 		AreaOptions: `{"areas": ["CT", "CEIC", "AG", "OUTRO"]}`,
 		Headers:     `{"headers": ["data", "hora", "resposta", "observacao", "area"]}`,
 	}
 
-	if err := m.db.Create(&modelInteract).Error; err != nil {
+	if err := m.db.Create(&m.App.Interaction).Error; err != nil {
 		return err
 	}
 
-	modelReport := model.AppReport{
+	m.App.Report = model.AppReport{
 		YesReport:   "S",
 		NoReport:    "N",
 		DefaultGoal: 8,
 	}
 
-	if err := m.db.Create(&modelReport).Error; err != nil {
+	if err := m.db.Create(&m.App.Report).Error; err != nil {
 		return err
 	}
 
-	modelApp := model.App{
+	m.App = &model.App{
 		AppID:         uuid.New(),
 		Name:          "PresencialApp",
 		Theme:         "light",
-		LanguageID:    modelLang.ID,
-		InteractionID: modelInteract.ID,
-		ReportID:      modelReport.ID,
+		LanguageID:    m.App.Language.ID,
+		InteractionID: m.App.Interaction.ID,
+		ReportID:      m.App.Report.ID,
 	}
-	return m.db.Create(&modelApp).Error
+
+	return m.db.Create(&m.App).Error
 }
 
 func (m *MainApp) loadMonthlyReport() string {
-	now := time.Now()
-	rows, err := m.db.Raw("SELECT date, area FROM presence_records WHERE strftime('%m', date) = ? AND strftime('%Y', date) = ? AND response = ?", now.Format("01"), now.Format("2006"), m.Language.Yes).Rows()
-	if err != nil {
-		return "Erro ao carregar relatório."
-	}
-	defer rows.Close()
-
-	var report string
-	count := 0
-	for rows.Next() {
-		var date, area string
-		if err := rows.Scan(&date, &area); err == nil {
-			report += fmt.Sprintf("* %s - %s\n", date, area)
-			count++
-		}
-	}
-
-	if count == 0 {
+	if len(m.records) == 0 {
 		return "Nenhuma presença registrada este mês."
 	}
-	return fmt.Sprintf("Você marcou presença %d vez(es) neste mês:\n\n%s", count, report)
+
+	var report string
+	for i, r := range m.records {
+		t, err := time.Parse(layoutISO, r.Date)
+		if err != nil {
+			continue
+		}
+
+		var prefix string
+		switch {
+		case i < m.DefaultGoal:
+			prefix = "☑️"
+		default:
+			prefix = "✅"
+		}
+
+		report += fmt.Sprintf("%s %s - %s\n", prefix, t.Format(layoutBR), r.Area)
+	}
+
+	for i := len(m.records); i < m.DefaultGoal; i++ {
+		report += "🔲 (pendente)\n"
+	}
+
+	return fmt.Sprintf("Você marcou presença %d vez(es) neste mês:\n\n%s", len(m.records), report)
 }
 
 func (m *MainApp) RunApp() {

@@ -61,15 +61,12 @@ type AppReport struct {
 }
 
 type AppConfig struct {
-	AppID          uuid.UUID
-	FolderName     string
-	ReportFilePath string
-	DefaultGoal    int
-	YesReport      string
-	NoReport       string
-	ExtraLabel     string
-	AreaOptions    []string
-	Headers        []string
+	DefaultGoal int
+	YesReport   string
+	NoReport    string
+	ExtraLabel  string
+	AreaOptions []string
+	Headers     []string
 }
 
 type PresenceRecord struct {
