@@ -17,10 +17,8 @@ type App struct {
 	Language      AppLanguage `gorm:"foreignKey:LanguageID"`
 	InteractionID uint
 	Interaction   AppInteraction `gorm:"foreignKey:InteractionID"`
-	ReportID      uint
-	Report        AppReport `gorm:"foreignKey:ReportID"`
-	ConfigID      uint
-	Config        AppConfig `gorm:"foreignKey:ConfigID"`
+	AppConfigID   uint
+	AppConfig     AppConfig `gorm:"foreignKey:AppConfigID"`
 }
 
 type AppLanguage struct {
@@ -54,20 +52,9 @@ type AppInteraction struct {
 	Headers     string
 }
 
-type AppReport struct {
-	ID          uint `gorm:"primarykey"`
-	CreatedAt   time.Time
-	YesReport   string
-	NoReport    string
-	DefaultGoal int
-}
-
 type AppConfig struct {
 	ID          uint `gorm:"primarykey"`
 	DefaultGoal int
-	YesReport   string
-	NoReport    string
-	ExtraLabel  string
 }
 
 type PresenceRecord struct {
@@ -77,9 +64,4 @@ type PresenceRecord struct {
 	Response    string
 	Observation string
 	Area        string
-}
-
-type Arr struct {
-	ValuesArea    []string `json:"areas"`
-	ValuesHeaders []string `json:"headers"`
 }

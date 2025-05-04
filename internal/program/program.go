@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -26,24 +27,24 @@ import (
 const layoutISO = "2006-01-02"
 const layoutBR = "02/01/2006"
 
+type arr struct {
+	ValuesArea    []string `json:"areas"`
+	ValuesHeaders []string `json:"headers"`
+}
+
 type MainApp struct {
-	db *gorm.DB
-
-	app fyne.App
-	win fyne.Window
-
-	firstRun bool
-
 	*model.App
-	records []model.PresenceRecord
+	db       *gorm.DB
+	app      fyne.App
+	win      fyne.Window
+	firstRun bool
+	records  []model.PresenceRecord
 }
 
 func NewMainApp(appName string) (*MainApp, error) {
 	a := &MainApp{
-		app: theme.NewSmallFontTheme(app.New()),
-		App: &model.App{
-			Config: model.AppConfig{},
-		},
+		app:     theme.NewSmallFontTheme(app.New()),
+		App:     &model.App{},
 		records: []model.PresenceRecord{},
 	}
 
@@ -63,13 +64,13 @@ func (m *MainApp) getAppDataFolder(appName string) string {
 
 	switch runtime.GOOS {
 	case "windows":
-		base = os.Getenv("AppData") // e.g., C:\Users\<User>\AppData\Roaming
+		base = os.Getenv("AppData")
 		if base == "" {
 			base = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
 		}
 	case "darwin":
 		base = filepath.Join(os.Getenv("HOME"), "Library", "Application Support")
-	default: // Linux and others
+	default:
 		base = os.Getenv("XDG_DATA_HOME")
 		if base == "" {
 			base = filepath.Join(os.Getenv("HOME"), ".local", "share")
@@ -100,9 +101,9 @@ func (m *MainApp) setupDatabase(appName string) error {
 	if err = m.db.AutoMigrate(
 		&model.AppLanguage{},
 		&model.AppInteraction{},
-		&model.AppReport{},
 		&model.App{},
 		&model.PresenceRecord{},
+		&model.AppConfig{},
 	); err != nil {
 		return fmt.Errorf("erro ao migrar estruturas: %v", err)
 	}
@@ -116,8 +117,10 @@ func (m *MainApp) setupDatabase(appName string) error {
 }
 
 func (m *MainApp) initApp() error {
-	if err := m.loadConfigFromDB(); err != nil {
-		return err
+	if !m.firstRun {
+		if err := m.loadConfigFromDB(); err != nil {
+			return err
+		}
 	}
 
 	m.buildMainMenu()
@@ -137,7 +140,7 @@ func (m *MainApp) loadConfigFromDB() error {
 	if err := m.db.
 		Preload("Language").
 		Preload("Interaction").
-		Preload("Report").
+		Preload("AppConfig").
 		First(&m.App).Error; err != nil {
 		return fmt.Errorf("erro ao carregar dados do app: %w", err)
 	}
@@ -159,13 +162,6 @@ func (m *MainApp) loadConfigFromDB() error {
 		}
 	}
 
-	m.App.Config = model.AppConfig{
-		DefaultGoal: m.App.Report.DefaultGoal,
-		YesReport:   m.App.Report.YesReport,
-		NoReport:    m.App.Report.NoReport,
-		ExtraLabel:  m.App.Interaction.ExtraLabel,
-	}
-
 	return nil
 }
 
@@ -178,9 +174,9 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 	label := widget.NewLabel("Você está presencial hoje?")
 
 	buttonYes := widget.NewButton("✔ Sim", func() {
-		if len(m.records) >= m.App.Config.DefaultGoal {
+		if len(m.records) >= m.App.AppConfig.DefaultGoal {
 			info := dialog.NewInformation("Meta atingida",
-				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", m.App.Config.DefaultGoal), m.win,
+				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", m.App.AppConfig.DefaultGoal), m.win,
 			)
 
 			info.SetOnClosed(func() {
@@ -219,7 +215,7 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 func (m *MainApp) showAreaPopup(observation string) {
 	newArea := ""
 
-	var area model.Arr
+	var area arr
 	_ = json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area)
 
 	selectWidget := widget.NewSelect(area.ValuesArea, func(selected string) { newArea = selected })
@@ -276,6 +272,216 @@ func (m *MainApp) savePresenceToDB(presence *model.PresenceRecord) error {
 	return m.db.Create(presence).Error
 }
 
+func (m *MainApp) updateGoal(text string) error {
+	dg, err := strconv.Atoi(text)
+	if err != nil || dg < 1 || dg > 24 {
+		dialog.ShowError(fmt.Errorf("valores inválidos"), m.win)
+		return err
+	}
+
+	if err := m.db.Preload("AppConfig").Where("app_id = ?", m.App).Error; err != nil {
+		dialog.ShowError(fmt.Errorf("erro ao buscar a: %w", err), m.win)
+		return err
+	}
+
+	m.AppConfig.DefaultGoal = dg
+
+	if err := m.db.Save(&m.App.AppConfig).Error; err != nil {
+		dialog.ShowError(fmt.Errorf("erro ao salvar config: %w", err), m.win)
+		return err
+	}
+	return nil
+}
+
+func (m *MainApp) showHeaderConfigForm(onComplete func()) {
+	var current arr
+	if err := json.Unmarshal([]byte(m.Interaction.Headers), &current); err != nil {
+		dialog.ShowError(fmt.Errorf("erro ao carregar headers: %w", err), m.win)
+		return
+	}
+
+	var headerEntries []*widget.Entry
+	var headerContainers []fyne.CanvasObject
+
+	buildHeaderList := func() []fyne.CanvasObject {
+		return headerContainers
+	}
+
+	formContent := container.NewVBox()
+
+	for _, header := range current.ValuesHeaders {
+		entry := widget.NewEntry()
+		entry.SetText(header)
+
+		removeBtn := widget.NewButton("🗑", func(e *widget.Entry) func() {
+			return func() {
+				index := -1
+				for i, en := range headerEntries {
+					if en == e {
+						index = i
+						break
+					}
+				}
+				if index >= 0 {
+					headerEntries = append(headerEntries[:index], headerEntries[index+1:]...)
+					headerContainers = append(headerContainers[:index], headerContainers[index+1:]...)
+					formContent.Objects = buildHeaderList()
+					formContent.Refresh()
+				}
+			}
+		}(entry))
+
+		row := container.NewBorder(nil, nil, nil, removeBtn, entry)
+		headerEntries = append(headerEntries, entry)
+		headerContainers = append(headerContainers, row)
+	}
+
+	formContent.Objects = buildHeaderList()
+
+	addBtn := widget.NewButton("➕ Novo Header", func() {
+		entry := widget.NewEntry()
+		entry.SetPlaceHolder("Novo header")
+
+		removeBtn := widget.NewButton("🗑", func(e *widget.Entry) func() {
+			return func() {
+				index := -1
+				for i, en := range headerEntries {
+					if en == e {
+						index = i
+						break
+					}
+				}
+				if index >= 0 {
+					headerEntries = append(headerEntries[:index], headerEntries[index+1:]...)
+					headerContainers = append(headerContainers[:index], headerContainers[index+1:]...)
+					formContent.Objects = buildHeaderList()
+					formContent.Refresh()
+				}
+			}
+		}(entry))
+
+		row := container.NewBorder(nil, nil, nil, removeBtn, entry)
+		headerEntries = append(headerEntries, entry)
+		headerContainers = append(headerContainers, row)
+		formContent.Objects = buildHeaderList()
+		formContent.Refresh()
+	})
+
+	saveBtn := widget.NewButton("💾 Salvar", func() {
+		var newHeaders []string
+		for _, e := range headerEntries {
+			txt := strings.TrimSpace(e.Text)
+			if txt != "" {
+				newHeaders = append(newHeaders, txt)
+			}
+		}
+
+		newData, err := json.Marshal(map[string][]string{"headers": newHeaders})
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("erro ao serializar headers: %w", err), m.win)
+			return
+		}
+
+		m.Interaction.Headers = string(newData)
+		if err := m.db.Save(&m.Interaction).Error; err != nil {
+			dialog.ShowError(fmt.Errorf("erro ao salvar no banco: %w", err), m.win)
+			return
+		}
+
+		dialog.ShowInformation("Sucesso", "Headers atualizados!", m.win)
+		onComplete()
+	})
+
+	mainForm := container.NewVBox(
+		widget.NewLabel("Editar Headers:"),
+		addBtn,
+		formContent,
+		saveBtn,
+	)
+
+	m.win.SetContent(container.NewVScroll(mainForm))
+	m.win.Resize(fyne.NewSize(400, 400))
+	m.win.Show()
+}
+
+func (m *MainApp) showAreaConfigForm(onComplete func()) {
+	var area arr
+	if err := json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area); err != nil {
+		dialog.ShowError(fmt.Errorf("erro ao carregar áreas: %w", err), m.win)
+		return
+	}
+
+	var entries []*widget.Entry
+	formContainer := container.NewVBox()
+
+	var refreshForm func()
+	refreshForm = func() {
+		formContainer.Objects = nil
+		entries = []*widget.Entry{}
+
+		for _, val := range area.ValuesArea {
+			entry := widget.NewEntry()
+			entry.SetText(val)
+			entries = append(entries, entry)
+
+			delBtn := widget.NewButton("🗑", func(e *widget.Entry) func() {
+				return func() {
+					for i, en := range entries {
+						if en == e {
+							area.ValuesArea = append(area.ValuesArea[:i], area.ValuesArea[i+1:]...)
+							refreshForm()
+							return
+						}
+					}
+				}
+			}(entry))
+
+			row := container.NewHBox(entry, delBtn)
+			formContainer.Add(row)
+		}
+
+		addBtn := widget.NewButton("➕ Adicionar nova área", func() {
+			area.ValuesArea = append(area.ValuesArea, "")
+			refreshForm()
+		})
+		formContainer.Add(addBtn)
+	}
+
+	saveBtn := widget.NewButton("💾 Salvar", func() {
+		var newAreas []string
+		for _, e := range entries {
+			val := e.Text
+			if val != "" {
+				newAreas = append(newAreas, val)
+			}
+		}
+		area.ValuesArea = newAreas
+
+		areaJSON, err := json.Marshal(area)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("erro ao serializar áreas: %w", err), m.win)
+			return
+		}
+
+		m.App.Interaction.AreaOptions = string(areaJSON)
+		if err := m.db.Save(&m.App.Interaction).Error; err != nil {
+			dialog.ShowError(fmt.Errorf("erro ao salvar no banco de dados: %w", err), m.win)
+			return
+		}
+
+		dialog.ShowInformation("Sucesso", "Áreas atualizadas com sucesso", m.win)
+		onComplete()
+	})
+
+	refreshForm()
+
+	content := container.NewBorder(nil, saveBtn, nil, nil, formContainer)
+
+	m.win.SetContent(content)
+	m.win.Resize(fyne.NewSize(400, 400))
+	m.win.Show()
+}
+
 func (m *MainApp) buildMainMenu() {
 	m.win = m.app.NewWindow(m.Language.Title)
 	m.win.SetFixedSize(true)
@@ -289,6 +495,17 @@ func (m *MainApp) buildMainMenu() {
 	editMenu := fyne.NewMenu("Editar",
 		fyne.NewMenuItem("Configurar Meta de Dias", func() {
 			m.showConfigForm(func() {
+				m.win.SetContent(m.buildMainContent())
+			})
+		}),
+		fyne.NewMenuItem("Editar Headers", func() {
+			m.showHeaderConfigForm(func() {
+				m.win.SetContent(m.buildMainContent())
+			})
+		}),
+
+		fyne.NewMenuItem("Editar Áreas", func() {
+			m.showAreaConfigForm(func() {
 				m.win.SetContent(m.buildMainContent())
 			})
 		}),
@@ -311,25 +528,11 @@ func (m *MainApp) buildMainMenu() {
 
 func (m *MainApp) showConfigForm(onComplete func()) {
 	entryDefault := widget.NewEntry()
-	entryDefault.SetPlaceHolder("Dias presenciais (ex: 8)")
+	entryDefault.SetPlaceHolder(fmt.Sprintf("Dias presenciais (ex: %d)", m.AppConfig.DefaultGoal))
 
 	saveBtn := widget.NewButton("Salvar", func() {
-		dg, err := strconv.Atoi(entryDefault.Text)
-		if err != nil || dg < 1 || dg > 24 {
-			dialog.ShowError(fmt.Errorf("valores inválidos"), m.win)
-			return
-		}
-
-		m.App.Config.DefaultGoal = dg
-
-		if err := m.db.Preload("Report").Where("app_id = ?", m.AppID).First(&m.App).Error; err != nil {
-			dialog.ShowError(fmt.Errorf("erro ao buscar a: %w", err), m.win)
-			return
-		}
-
-		m.Report.DefaultGoal = dg
-		if err := m.db.Save(&m.Report).Error; err != nil {
-			dialog.ShowError(fmt.Errorf("erro ao salvar config: %w", err), m.win)
+		if err := m.updateGoal(entryDefault.Text); err != nil {
+			dialog.ShowError(fmt.Errorf("erro ao atualizar meta: %w", err), m.win)
 			return
 		}
 
@@ -355,7 +558,7 @@ func (m *MainApp) createDefaultApp() error {
 		return nil
 	}
 
-	m.App.Language = model.AppLanguage{
+	m.Language = model.AppLanguage{
 		WindowName:  "Controle de Presença",
 		Title:       "Controle de Presença",
 		Welcome:     "Bem-vindo",
@@ -377,27 +580,25 @@ func (m *MainApp) createDefaultApp() error {
 		Info:        "Informação",
 	}
 
-	if err := m.db.Create(&m.App.Language).Error; err != nil {
+	if err := m.db.Create(&m.Language).Error; err != nil {
 		return err
 	}
 
-	m.App.Interaction = model.AppInteraction{
+	m.Interaction = model.AppInteraction{
 		ExtraLabel:  "adicional",
 		AreaOptions: `{"areas": ["CT", "CEIC", "AG", "OUTRO"]}`,
 		Headers:     `{"headers": ["data", "hora", "resposta", "observacao", "area"]}`,
 	}
 
-	if err := m.db.Create(&m.App.Interaction).Error; err != nil {
+	if err := m.db.Create(&m.Interaction).Error; err != nil {
 		return err
 	}
 
-	m.App.Report = model.AppReport{
-		YesReport:   "S",
-		NoReport:    "N",
-		DefaultGoal: 8,
+	m.AppConfig = model.AppConfig{
+		DefaultGoal: 4,
 	}
 
-	if err := m.db.Create(&m.App.Report).Error; err != nil {
+	if err := m.db.Create(&m.AppConfig).Error; err != nil {
 		return err
 	}
 
@@ -405,38 +606,26 @@ func (m *MainApp) createDefaultApp() error {
 		AppID:         uuid.New(),
 		Name:          "PresencialApp",
 		Theme:         "light",
-		LanguageID:    m.App.Language.ID,
-		InteractionID: m.App.Interaction.ID,
-		ReportID:      m.App.Report.ID,
+		LanguageID:    m.Language.ID,
+		InteractionID: m.Interaction.ID,
+		AppConfigID:   m.AppConfig.ID,
 	}
 
 	return m.db.Create(&m.App).Error
 }
 
 func (m *MainApp) loadMonthlyReport() string {
-	if len(m.records) == 0 {
-		return "Nenhuma presença registrada este mês."
-	}
-
 	var report string
-	for i, r := range m.records {
+	for _, r := range m.records {
 		t, err := time.Parse(layoutISO, r.Date)
 		if err != nil {
 			continue
 		}
 
-		var prefix string
-		switch {
-		case i < m.App.Config.DefaultGoal:
-			prefix = "☑️"
-		default:
-			prefix = "✅"
-		}
-
-		report += fmt.Sprintf("%s %s - %s\n", prefix, t.Format(layoutBR), r.Area)
+		report += fmt.Sprintf("☑️ %s - %s\n", t.Format(layoutBR), r.Area)
 	}
 
-	for i := len(m.records); i < m.App.Config.DefaultGoal; i++ {
+	for i := len(m.records); i < m.AppConfig.DefaultGoal; i++ {
 		report += "🔲 (pendente)\n"
 	}
 
