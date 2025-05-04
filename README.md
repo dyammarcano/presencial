@@ -1,6 +1,7 @@
 # Precencial - Controle de Presença Mensal
 
-Este aplicativo em Python permite registrar se você esteve **presencial** em um determinado dia. Ele é ideal para o controle informal de frequência ou uso recorrente de atividades como reuniões ou medicação.
+Este aplicativo em Python permite registrar se você esteve **presencial** em um determinado dia. Ele é ideal para o
+controle informal de frequência ou uso recorrente de atividades como reuniões ou medicação.
 
 ---
 
@@ -35,11 +36,11 @@ Os dados são armazenados na pasta:
 
 ### Arquivos criados:
 
-| Arquivo                | Descrição                                |
-|------------------------|------------------------------------------|
-| `registros.csv`        | Armazena todos os registros              |
-| `config.txt`           | Meta mensal definida pelo usuário        |
-| `presence_tracker.log` | Log de execução e erros do sistema       |
+| Arquivo                | Descrição                          |
+|------------------------|------------------------------------|
+| `registros.csv`        | Armazena todos os registros        |
+| `config.txt`           | Meta mensal definida pelo usuário  |
+| `presence_tracker.log` | Log de execução e erros do sistema |
 
 ---
 
@@ -74,7 +75,8 @@ Este aplicativo é compatível com:
 - ✅ Linux
 - ✅ macOS
 
-Requisitos:  
+Requisitos:
+
 - Python 3.7+
 - Módulos padrão: `tkinter`, `csv`, `enum`, `dataclasses`, `logging`
 
