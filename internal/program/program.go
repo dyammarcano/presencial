@@ -24,8 +24,15 @@ import (
 	"gorm.io/gorm"
 )
 
-const layoutISO = "2006-01-02"
-const layoutBR = "02/01/2006"
+const (
+	layoutISO = "2006-01-02"
+	layoutBR  = "02/01/2006"
+
+	high       = 320
+	highPopup  = 80
+	width      = 400
+	widthPopup = 200
+)
 
 type arr struct {
 	ValuesArea    []string `json:"areas"`
@@ -262,7 +269,7 @@ func (m *MainApp) showAreaPopup(observation string) {
 		),
 	), m.win)
 
-	pop.Resize(fyne.NewSize(340, 180))
+	pop.Resize(fyne.NewSize(widthPopup, highPopup))
 	pop.Show()
 }
 
@@ -392,15 +399,21 @@ func (m *MainApp) showHeaderConfigForm(onComplete func()) {
 		onComplete()
 	})
 
+	cancelBtn := widget.NewButton("✖ Cancelar", func() {
+		onComplete()
+	})
+
+	buttons := container.NewHBox(layout.NewSpacer(), cancelBtn, saveBtn)
+
 	mainForm := container.NewVBox(
 		widget.NewLabel("Editar Headers:"),
-		addBtn,
 		formContent,
-		saveBtn,
+		addBtn,
+		buttons,
 	)
 
 	m.win.SetContent(container.NewVScroll(mainForm))
-	m.win.Resize(fyne.NewSize(400, 400))
+	m.win.Resize(fyne.NewSize(width, high))
 	m.win.Show()
 }
 
@@ -422,6 +435,9 @@ func (m *MainApp) showAreaConfigForm(onComplete func()) {
 		for _, val := range area.ValuesArea {
 			entry := widget.NewEntry()
 			entry.SetText(val)
+			entry.MultiLine = false
+			entry.SetMinRowsVisible(2)
+
 			entries = append(entries, entry)
 
 			delBtn := widget.NewButton("🗑", func(e *widget.Entry) func() {
@@ -436,7 +452,7 @@ func (m *MainApp) showAreaConfigForm(onComplete func()) {
 				}
 			}(entry))
 
-			row := container.NewHBox(entry, delBtn)
+			row := container.NewBorder(nil, nil, nil, delBtn, entry)
 			formContainer.Add(row)
 		}
 
@@ -473,12 +489,22 @@ func (m *MainApp) showAreaConfigForm(onComplete func()) {
 		onComplete()
 	})
 
+	cancelBtn := widget.NewButton("✖ Cancelar", func() {
+		onComplete()
+	})
+
+	buttons := container.NewHBox(layout.NewSpacer(), cancelBtn, saveBtn)
+
+	content := container.NewVBox(
+		widget.NewLabelWithStyle("Editar Áreas", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		formContainer,
+		buttons,
+	)
+
 	refreshForm()
 
-	content := container.NewBorder(nil, saveBtn, nil, nil, formContainer)
-
 	m.win.SetContent(content)
-	m.win.Resize(fyne.NewSize(400, 400))
+	m.win.Resize(fyne.NewSize(width, high))
 	m.win.Show()
 }
 
@@ -530,7 +556,16 @@ func (m *MainApp) showConfigForm(onComplete func()) {
 	entryDefault := widget.NewEntry()
 	entryDefault.SetPlaceHolder(fmt.Sprintf("Dias presenciais (ex: %d)", m.AppConfig.DefaultGoal))
 
-	saveBtn := widget.NewButton("Salvar", func() {
+	if !m.firstRun {
+		entryDefault.SetText(strconv.Itoa(m.AppConfig.DefaultGoal))
+	}
+
+	saveBtn := widget.NewButton("💾 Salvar", func() {
+		if entryDefault.Text == "" {
+			dialog.ShowError(fmt.Errorf("o valor precisa não pode estar vacio"), m.win)
+			return
+		}
+
 		if err := m.updateGoal(entryDefault.Text); err != nil {
 			dialog.ShowError(fmt.Errorf("erro ao atualizar meta: %w", err), m.win)
 			return
@@ -540,14 +575,20 @@ func (m *MainApp) showConfigForm(onComplete func()) {
 		onComplete()
 	})
 
+	cancelBtn := widget.NewButton("✖ Cancelar", func() {
+		onComplete()
+	})
+
+	buttons := container.NewHBox(layout.NewSpacer(), cancelBtn, saveBtn)
+
 	form := container.NewVBox(
-		widget.NewLabel("Primeiro uso - configure os limites de presença:"),
+		widget.NewLabel("Configure os dias de presença:"),
 		entryDefault,
-		saveBtn,
+		buttons,
 	)
 
 	m.win.SetContent(form)
-	m.win.Resize(fyne.NewSize(300, 200))
+	m.win.Resize(fyne.NewSize(width, high))
 	m.win.Show()
 }
 
@@ -633,7 +674,7 @@ func (m *MainApp) loadMonthlyReport() string {
 }
 
 func (m *MainApp) RunApp() {
-	m.win.Resize(fyne.NewSize(400, 250))
+	m.win.Resize(fyne.NewSize(width, high))
 	m.win.CenterOnScreen()
 	m.win.ShowAndRun()
 }
