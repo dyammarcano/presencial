@@ -7,9 +7,12 @@ on:
 
 jobs:
   call-release-workflow:
-    uses: inovacc/workflows/.github/workflows/reusable-go-release.yml@main
+    uses: inovacc/workflows/.github/workflows/reusable-go-release.yml@matrix
     with:
       run-release: true
+      build-windows: true
+      build-macos: false
     permissions:
       contents: write
     secrets: inherit
+
