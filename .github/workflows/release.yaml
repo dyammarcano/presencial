@@ -6,7 +6,7 @@ on:
       - '*'
 
 jobs:
-  call-release-workflow:
+  release:
     uses: inovacc/workflows/.github/workflows/reusable-go-release.yml@matrix
     with:
       run-release: true
