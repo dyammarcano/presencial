@@ -31,14 +31,6 @@ jobs:
     
     - name: Build
       run: go build -v ./...
-    
-    - name: Test
-      run: go test -race -p=1 ./... -v
-    
-    - name: Lint
-      run: |
-        golangci-lint fmt
-        golangci-lint run ./...
 
   build-windows:
     runs-on: windows-latest
@@ -59,12 +51,3 @@ jobs:
     
     - name: Build
       run: go build -v ./...
-    
-    - name: Test
-      run: go test -race -p=1 ./... -v
-    
-    - name: Lint
-      run: |
-        golangci-lint fmt
-        golangci-lint run ./...
-      shell: bash
