@@ -90,7 +90,7 @@ Este aplicativo é compatível com:
 
 Requisitos:
 
-- Go 1.24+ (para compilação)
+- Go 1.23.0+ (para compilação)
 - Bibliotecas: Fyne.io, GORM, SQLite
 
 ---
