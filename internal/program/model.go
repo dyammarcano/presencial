@@ -1,4 +1,5 @@
-package model
+// Package program provides the core functionality for the attendance tracking application
+package program
 
 import (
 	"time"
@@ -6,6 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
+// App represents the main application entity with configuration and localization settings
 type App struct {
 	ID            uint `gorm:"primarykey"`
 	CreatedAt     time.Time
@@ -21,6 +23,7 @@ type App struct {
 	AppConfig     AppConfig `gorm:"foreignKey:AppConfigID"`
 }
 
+// AppLanguage contains all the localized text strings used in the application interface
 type AppLanguage struct {
 	ID          uint `gorm:"primarykey"`
 	CreatedAt   time.Time
@@ -45,6 +48,7 @@ type AppLanguage struct {
 	Info        string
 }
 
+// AppInteraction defines the interaction elements and options for the application
 type AppInteraction struct {
 	ID          uint `gorm:"primarykey"`
 	ExtraLabel  string
@@ -52,11 +56,13 @@ type AppInteraction struct {
 	Headers     string
 }
 
+// AppConfig stores configuration settings for the application
 type AppConfig struct {
 	ID          uint `gorm:"primarykey"`
 	DefaultGoal int
 }
 
+// PresenceRecord to hold records
 type PresenceRecord struct {
 	ID          uint `gorm:"primaryKey"`
 	Date        string

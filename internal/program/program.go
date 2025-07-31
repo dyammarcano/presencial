@@ -18,7 +18,6 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"fyne.io/systray"
-	"github.com/dyammarcano/presencial/internal/model"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -39,20 +38,22 @@ type arr struct {
 	ValuesHeaders []string `json:"headers"`
 }
 
+// MainApp main app structure
 type MainApp struct {
-	*model.App
+	*App
 	db       *gorm.DB
 	app      fyne.App
 	win      fyne.Window
 	firstRun bool
-	records  []model.PresenceRecord
+	records  []PresenceRecord
 }
 
+// NewMainApp main app structure
 func NewMainApp(appName string) (*MainApp, error) {
 	a := &MainApp{
 		app:     newSmallFontTheme(app.New()),
-		App:     &model.App{},
-		records: []model.PresenceRecord{},
+		App:     &App{},
+		records: []PresenceRecord{},
 	}
 
 	if err := a.setupDatabase(appName); err != nil {
@@ -106,11 +107,11 @@ func (m *MainApp) setupDatabase(appName string) error {
 	}
 
 	if err = m.db.AutoMigrate(
-		&model.AppLanguage{},
-		&model.AppInteraction{},
-		&model.App{},
-		&model.PresenceRecord{},
-		&model.AppConfig{},
+		&AppLanguage{},
+		&AppInteraction{},
+		&App{},
+		&PresenceRecord{},
+		&AppConfig{},
 	); err != nil {
 		return fmt.Errorf("erro ao migrar estruturas: %v", err)
 	}
@@ -152,7 +153,7 @@ func (m *MainApp) loadConfigFromDB() error {
 		return fmt.Errorf("erro ao carregar dados do app: %w", err)
 	}
 
-	var allRecords []model.PresenceRecord
+	var allRecords []PresenceRecord
 	if err := m.db.Order("date DESC, time DESC").Find(&allRecords).Error; err != nil {
 		log.Printf("erro ao carregar registros anteriores: %v", err)
 	}
@@ -181,9 +182,9 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 	label := widget.NewLabel("Como você está trabalhando hoje?")
 
 	buttonPresencial := widget.NewButton("✔ Presencial", func() {
-		if len(m.records) >= m.App.AppConfig.DefaultGoal {
+		if len(m.records) >= m.AppConfig.DefaultGoal {
 			info := dialog.NewInformation("Meta atingida",
-				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", m.App.AppConfig.DefaultGoal), m.win,
+				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", m.AppConfig.DefaultGoal), m.win,
 			)
 
 			info.SetOnClosed(func() {
@@ -197,7 +198,7 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 	})
 
 	buttonRemoto := widget.NewButton("✔ Remoto", func() {
-		if err := m.savePresenceToDB(&model.PresenceRecord{Response: "Remoto", Observation: observation, Area: "Remoto"}); err != nil {
+		if err := m.savePresenceToDB(&PresenceRecord{Response: "Remoto", Observation: observation, Area: "Remoto"}); err != nil {
 			m.app.SendNotification(&fyne.Notification{
 				Title:   "Erro",
 				Content: err.Error(),
@@ -233,7 +234,7 @@ func (m *MainApp) showAreaPopup(observation string) {
 	newArea := ""
 
 	var area arr
-	_ = json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area)
+	_ = json.Unmarshal([]byte(m.Interaction.AreaOptions), &area)
 
 	selectWidget := widget.NewSelect(area.ValuesArea, func(selected string) { newArea = selected })
 	selectWidget.PlaceHolder = "Selecione o local de trabalho"
@@ -246,7 +247,7 @@ func (m *MainApp) showAreaPopup(observation string) {
 			return
 		}
 
-		if err := m.savePresenceToDB(&model.PresenceRecord{Response: "Presencial", Observation: observation, Area: newArea}); err != nil {
+		if err := m.savePresenceToDB(&PresenceRecord{Response: "Presencial", Observation: observation, Area: newArea}); err != nil {
 			m.app.SendNotification(&fyne.Notification{
 				Title:   "Erro",
 				Content: err.Error(),
@@ -283,7 +284,7 @@ func (m *MainApp) showAreaPopup(observation string) {
 	pop.Show()
 }
 
-func (m *MainApp) savePresenceToDB(presence *model.PresenceRecord) error {
+func (m *MainApp) savePresenceToDB(presence *PresenceRecord) error {
 	presence.Date = time.Now().Format(layoutISO)
 	presence.Time = time.Now().Format("15:04:05")
 	return m.db.Create(presence).Error
@@ -303,7 +304,7 @@ func (m *MainApp) updateGoal(text string) error {
 
 	m.AppConfig.DefaultGoal = dg
 
-	if err := m.db.Save(&m.App.AppConfig).Error; err != nil {
+	if err := m.db.Save(&m.AppConfig).Error; err != nil {
 		dialog.ShowError(fmt.Errorf("erro ao salvar config: %w", err), m.win)
 		return err
 	}
@@ -429,7 +430,7 @@ func (m *MainApp) showHeaderConfigForm(onComplete func()) {
 
 func (m *MainApp) showAreaConfigForm(onComplete func()) {
 	var area arr
-	if err := json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area); err != nil {
+	if err := json.Unmarshal([]byte(m.Interaction.AreaOptions), &area); err != nil {
 		dialog.ShowError(fmt.Errorf("erro ao carregar áreas: %w", err), m.win)
 		return
 	}
@@ -489,8 +490,8 @@ func (m *MainApp) showAreaConfigForm(onComplete func()) {
 			return
 		}
 
-		m.App.Interaction.AreaOptions = string(areaJSON)
-		if err := m.db.Save(&m.App.Interaction).Error; err != nil {
+		m.Interaction.AreaOptions = string(areaJSON)
+		if err := m.db.Save(&m.Interaction).Error; err != nil {
 			dialog.ShowError(fmt.Errorf("erro ao salvar no banco de dados: %w", err), m.win)
 			return
 		}
@@ -528,7 +529,12 @@ func (m *MainApp) buildMainMenu() {
 				if err != nil || writer == nil {
 					return
 				}
-				defer writer.Close()
+				defer func(writer fyne.URIWriteCloser) {
+					if err := writer.Close(); err != nil {
+						dialog.ShowError(err, m.win)
+						return
+					}
+				}(writer)
 
 				// Get the file path from the URI
 				filePath := writer.URI().Path()
@@ -549,7 +555,12 @@ func (m *MainApp) buildMainMenu() {
 				if err != nil || reader == nil {
 					return
 				}
-				defer reader.Close()
+				defer func(reader fyne.URIReadCloser) {
+					if err := reader.Close(); err != nil {
+						dialog.ShowError(err, m.win)
+						return
+					}
+				}(reader)
 
 				// Get the file path from the URI
 				filePath := reader.URI().Path()
@@ -645,12 +656,12 @@ func (m *MainApp) showConfigForm(onComplete func()) {
 
 func (m *MainApp) createDefaultApp() error {
 	var count int64
-	m.db.Model(&model.App{}).Count(&count)
+	m.db.Model(&App{}).Count(&count)
 	if count > 0 {
 		return nil
 	}
 
-	m.Language = model.AppLanguage{
+	m.Language = AppLanguage{
 		WindowName:  "Controle de Presença",
 		Title:       "Controle de Presença",
 		Welcome:     "Bem-vindo",
@@ -676,7 +687,7 @@ func (m *MainApp) createDefaultApp() error {
 		return err
 	}
 
-	m.Interaction = model.AppInteraction{
+	m.Interaction = AppInteraction{
 		ExtraLabel:  "adicional",
 		AreaOptions: `{"areas": ["CT", "CEIC", "AG", "OUTRO"]}`,
 		Headers:     `{"headers": ["data", "hora", "resposta", "observacao", "area"]}`,
@@ -686,7 +697,7 @@ func (m *MainApp) createDefaultApp() error {
 		return err
 	}
 
-	m.AppConfig = model.AppConfig{
+	m.AppConfig = AppConfig{
 		DefaultGoal: 4,
 	}
 
@@ -694,7 +705,7 @@ func (m *MainApp) createDefaultApp() error {
 		return err
 	}
 
-	m.App = &model.App{
+	m.App = &App{
 		AppID:         uuid.New(),
 		Name:          "PresencialApp",
 		Theme:         "light",
@@ -716,15 +727,14 @@ func (m *MainApp) loadMonthlyReport() string {
 			continue
 		}
 
-		if r.Response == "Presencial" {
+		switch r.Response {
+		case "Presencial":
 			report += fmt.Sprintf("🏢 %s - %s (Presencial)\n", t.Format(layoutBR), r.Area)
 			presencialCount++
-		} else if r.Response == "Remoto" {
+		case "Remoto":
 			report += fmt.Sprintf("🏠 %s - Trabalho Remoto\n", t.Format(layoutBR))
-		} else {
-			// Handle legacy records
+		default:
 			report += fmt.Sprintf("☑️ %s - %s\n", t.Format(layoutBR), r.Area)
-			// Legacy records are no longer counted as presencial
 		}
 	}
 
@@ -738,7 +748,7 @@ func (m *MainApp) loadMonthlyReport() string {
 
 // exportToJSON exports all presence records to a JSON file
 func (m *MainApp) exportToJSON(filePath string) error {
-	var allRecords []model.PresenceRecord
+	var allRecords []PresenceRecord
 	if err := m.db.Order("date DESC, time DESC").Find(&allRecords).Error; err != nil {
 		return fmt.Errorf("erro ao carregar registros: %w", err)
 	}
@@ -762,7 +772,7 @@ func (m *MainApp) importFromJSON(filePath string) error {
 		return fmt.Errorf("erro ao ler arquivo: %w", err)
 	}
 
-	var records []model.PresenceRecord
+	var records []PresenceRecord
 	if err := json.Unmarshal(data, &records); err != nil {
 		return fmt.Errorf("erro ao processar JSON: %w", err)
 	}
@@ -786,7 +796,7 @@ func (m *MainApp) importFromJSON(filePath string) error {
 	for _, record := range records {
 		// Check if record already exists
 		var count int64
-		tx.Model(&model.PresenceRecord{}).
+		tx.Model(&PresenceRecord{}).
 			Where("date = ? AND time = ?", record.Date, record.Time).
 			Count(&count)
 
@@ -881,6 +891,7 @@ func (m *MainApp) setupTrayIcon() {
 	}()
 }
 
+// RunApp start point to run the application logic
 func (m *MainApp) RunApp() {
 	// Initialize the system tray
 	go func() {
