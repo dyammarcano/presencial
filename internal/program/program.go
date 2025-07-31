@@ -17,8 +17,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
+	"fyne.io/systray"
 	"github.com/dyammarcano/presencial/internal/model"
-	"github.com/dyammarcano/presencial/internal/theme"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -50,7 +50,7 @@ type MainApp struct {
 
 func NewMainApp(appName string) (*MainApp, error) {
 	a := &MainApp{
-		app:     theme.NewSmallFontTheme(app.New()),
+		app:     newSmallFontTheme(app.New()),
 		App:     &model.App{},
 		records: []model.PresenceRecord{},
 	}
@@ -178,9 +178,9 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 
 	observation := ""
 
-	label := widget.NewLabel("Você está presencial hoje?")
+	label := widget.NewLabel("Como você está trabalhando hoje?")
 
-	buttonYes := widget.NewButton("✔ Sim", func() {
+	buttonPresencial := widget.NewButton("✔ Presencial", func() {
 		if len(m.records) >= m.App.AppConfig.DefaultGoal {
 			info := dialog.NewInformation("Meta atingida",
 				fmt.Sprintf("Você já atingiu a meta de %d dias presenciais neste mês!", m.App.AppConfig.DefaultGoal), m.win,
@@ -196,18 +196,28 @@ func (m *MainApp) buildMainContent() fyne.CanvasObject {
 		m.showAreaPopup(observation)
 	})
 
-	buttonNo := widget.NewButton("✖ Não", func() {
+	buttonRemoto := widget.NewButton("✔ Remoto", func() {
+		if err := m.savePresenceToDB(&model.PresenceRecord{Response: "Remoto", Observation: observation, Area: "Remoto"}); err != nil {
+			m.app.SendNotification(&fyne.Notification{
+				Title:   "Erro",
+				Content: err.Error(),
+			})
+			<-time.After(10 * time.Millisecond)
+			return
+		}
+
 		m.app.SendNotification(&fyne.Notification{
-			Title:   "Informativo",
-			Content: "Tudo bem. Hoje não será contado como presencial.",
+			Title:   "Salvo",
+			Content: "Trabalho remoto registrado com sucesso.",
 		})
+		<-time.After(10 * time.Millisecond)
 		m.app.Quit()
 	})
 
 	buttons := container.New(
 		layout.NewGridLayoutWithColumns(2),
-		buttonNo,
-		buttonYes,
+		buttonRemoto,
+		buttonPresencial,
 	)
 
 	form := container.NewVBox(
@@ -226,17 +236,17 @@ func (m *MainApp) showAreaPopup(observation string) {
 	_ = json.Unmarshal([]byte(m.App.Interaction.AreaOptions), &area)
 
 	selectWidget := widget.NewSelect(area.ValuesArea, func(selected string) { newArea = selected })
-	selectWidget.PlaceHolder = "Selecione a área"
+	selectWidget.PlaceHolder = "Selecione o local de trabalho"
 
 	var pop dialog.Dialog
 
 	acceptButton := widget.NewButton("✔ Aceitar", func() {
 		if newArea == "" {
-			dialog.ShowInformation("Erro", "Você precisa selecionar uma área", m.win)
+			dialog.ShowInformation("Erro", "Você precisa selecionar um local", m.win)
 			return
 		}
 
-		if err := m.savePresenceToDB(&model.PresenceRecord{Response: m.Language.Yes, Observation: observation, Area: newArea}); err != nil {
+		if err := m.savePresenceToDB(&model.PresenceRecord{Response: "Presencial", Observation: observation, Area: newArea}); err != nil {
 			m.app.SendNotification(&fyne.Notification{
 				Title:   "Erro",
 				Content: err.Error(),
@@ -249,7 +259,7 @@ func (m *MainApp) showAreaPopup(observation string) {
 
 		m.app.SendNotification(&fyne.Notification{
 			Title:   "Salvo",
-			Content: "Presença registrada com sucesso.",
+			Content: "Presença presencial registrada com sucesso.",
 		})
 		<-time.After(10 * time.Millisecond)
 		m.app.Quit()
@@ -259,8 +269,8 @@ func (m *MainApp) showAreaPopup(observation string) {
 		pop.Hide()
 	})
 
-	pop = dialog.NewCustomWithoutButtons("Confirmação", container.NewVBox(
-		widget.NewLabel("Confirme a área selecionada:"),
+	pop = dialog.NewCustomWithoutButtons("Local de Trabalho", container.NewVBox(
+		widget.NewLabel("Selecione onde você está trabalhando presencialmente:"),
 		selectWidget,
 		container.New(
 			layout.NewGridLayoutWithColumns(2),
@@ -513,6 +523,47 @@ func (m *MainApp) buildMainMenu() {
 	m.win.SetFixedSize(true)
 
 	fileMenu := fyne.NewMenu("Arquivo",
+		fyne.NewMenuItem("Exportar Dados (JSON)", func() {
+			dialog.ShowFileSave(func(writer fyne.URIWriteCloser, err error) {
+				if err != nil || writer == nil {
+					return
+				}
+				defer writer.Close()
+
+				// Get the file path from the URI
+				filePath := writer.URI().Path()
+				if !strings.HasSuffix(filePath, ".json") {
+					filePath += ".json"
+				}
+
+				if err := m.exportToJSON(filePath); err != nil {
+					dialog.ShowError(err, m.win)
+					return
+				}
+
+				dialog.ShowInformation("Sucesso", "Dados exportados com sucesso", m.win)
+			}, m.win)
+		}),
+		fyne.NewMenuItem("Importar Dados (JSON)", func() {
+			dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+				if err != nil || reader == nil {
+					return
+				}
+				defer reader.Close()
+
+				// Get the file path from the URI
+				filePath := reader.URI().Path()
+
+				if err := m.importFromJSON(filePath); err != nil {
+					dialog.ShowError(err, m.win)
+					return
+				}
+
+				dialog.ShowInformation("Sucesso", "Dados importados com sucesso", m.win)
+				m.win.SetContent(m.buildMainContent())
+			}, m.win)
+		}),
+		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Sair", func() {
 			m.app.Quit()
 		}),
@@ -657,24 +708,194 @@ func (m *MainApp) createDefaultApp() error {
 
 func (m *MainApp) loadMonthlyReport() string {
 	var report string
+	var presencialCount int
+
 	for _, r := range m.records {
 		t, err := time.Parse(layoutISO, r.Date)
 		if err != nil {
 			continue
 		}
 
-		report += fmt.Sprintf("☑️ %s - %s\n", t.Format(layoutBR), r.Area)
+		if r.Response == "Presencial" {
+			report += fmt.Sprintf("🏢 %s - %s (Presencial)\n", t.Format(layoutBR), r.Area)
+			presencialCount++
+		} else if r.Response == "Remoto" {
+			report += fmt.Sprintf("🏠 %s - Trabalho Remoto\n", t.Format(layoutBR))
+		} else {
+			// Handle legacy records
+			report += fmt.Sprintf("☑️ %s - %s\n", t.Format(layoutBR), r.Area)
+			// Legacy records are no longer counted as presencial
+		}
 	}
 
-	for i := len(m.records); i < m.AppConfig.DefaultGoal; i++ {
-		report += "🔲 (pendente)\n"
+	// Only show pending for presencial goal
+	for i := presencialCount; i < m.AppConfig.DefaultGoal; i++ {
+		report += "🔲 (presencial pendente)\n"
 	}
 
-	return fmt.Sprintf("Você marcou presença %d vez(es) neste mês:\n\n%s", len(m.records), report)
+	return fmt.Sprintf("Você registrou %d dia(s) presencial(is) neste mês:\n\n%s", presencialCount, report)
+}
+
+// exportToJSON exports all presence records to a JSON file
+func (m *MainApp) exportToJSON(filePath string) error {
+	var allRecords []model.PresenceRecord
+	if err := m.db.Order("date DESC, time DESC").Find(&allRecords).Error; err != nil {
+		return fmt.Errorf("erro ao carregar registros: %w", err)
+	}
+
+	data, err := json.MarshalIndent(allRecords, "", "  ")
+	if err != nil {
+		return fmt.Errorf("erro ao serializar dados: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return fmt.Errorf("erro ao salvar arquivo: %w", err)
+	}
+
+	return nil
+}
+
+// importFromJSON imports presence records from a JSON file
+func (m *MainApp) importFromJSON(filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("erro ao ler arquivo: %w", err)
+	}
+
+	var records []model.PresenceRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return fmt.Errorf("erro ao processar JSON: %w", err)
+	}
+
+	// Validate records
+	for i, record := range records {
+		if record.Date == "" || record.Time == "" || record.Response == "" {
+			return fmt.Errorf("registro inválido na posição %d: campos obrigatórios ausentes", i)
+		}
+
+		// Validate date format
+		if _, err := time.Parse(layoutISO, record.Date); err != nil {
+			return fmt.Errorf("formato de data inválido no registro %d: %s", i, record.Date)
+		}
+	}
+
+	// Begin transaction
+	tx := m.db.Begin()
+
+	// Import records
+	for _, record := range records {
+		// Check if record already exists
+		var count int64
+		tx.Model(&model.PresenceRecord{}).
+			Where("date = ? AND time = ?", record.Date, record.Time).
+			Count(&count)
+
+		if count == 0 {
+			if err := tx.Create(&record).Error; err != nil {
+				tx.Rollback()
+				return fmt.Errorf("erro ao importar registro: %w", err)
+			}
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		return fmt.Errorf("erro ao finalizar importação: %w", err)
+	}
+
+	// Reload current month records
+	return m.loadConfigFromDB()
+}
+
+// setupTrayIcon configures the system tray icon and menu
+func (m *MainApp) setupTrayIcon() {
+	// Set up the systray icon
+	if m.app != nil && m.app.Icon() != nil {
+		systray.SetIcon(m.app.Icon().Content())
+	} else {
+		// Use a default icon from assets
+		iconPath := filepath.Join("assets", "Bokehlicia-Captiva-Baobab-stats.64.png")
+		if iconData, err := os.ReadFile(iconPath); err == nil {
+			systray.SetIcon(iconData)
+		} else {
+			log.Printf("Failed to load icon: %v", err)
+		}
+	}
+	systray.SetTitle("Presencial")
+	systray.SetTooltip("Controle de Presença")
+
+	// Create menu items
+	mShow := systray.AddMenuItem("Mostrar Janela", "Mostrar a janela principal")
+	systray.AddSeparator()
+	mExport := systray.AddMenuItem("Exportar Dados (JSON)", "Exportar registros para JSON")
+	mImport := systray.AddMenuItem("Importar Dados (JSON)", "Importar registros de JSON")
+	systray.AddSeparator()
+	mQuit := systray.AddMenuItem("Sair", "Fechar o aplicativo")
+
+	// Handle menu item clicks in a goroutine
+	go func() {
+		for {
+			select {
+			case <-mShow.ClickedCh:
+				// Show the window from the main thread
+				go func() {
+					m.win.Show()
+				}()
+			case <-mExport.ClickedCh:
+				// Show export dialog from the main thread
+				go func() {
+					// Create a temporary file path for export
+					tempDir := m.getAppDataFolder("presencial")
+					tempFile := filepath.Join(tempDir, "export_"+time.Now().Format("20060102_150405")+".json")
+
+					// Export data to the temporary file
+					if err := m.exportToJSON(tempFile); err != nil {
+						m.app.SendNotification(&fyne.Notification{
+							Title:   "Erro",
+							Content: "Falha ao exportar dados: " + err.Error(),
+						})
+						return
+					}
+
+					// Show success notification
+					m.app.SendNotification(&fyne.Notification{
+						Title:   "Sucesso",
+						Content: "Dados exportados para: " + tempFile,
+					})
+				}()
+			case <-mImport.ClickedCh:
+				// Show the window to allow user to use the import menu option
+				go func() {
+					m.win.Show()
+					m.app.SendNotification(&fyne.Notification{
+						Title:   "Importar Dados",
+						Content: "Use o menu Arquivo > Importar Dados para selecionar um arquivo",
+					})
+				}()
+			case <-mQuit.ClickedCh:
+				systray.Quit()
+				m.app.Quit()
+				return
+			}
+		}
+	}()
 }
 
 func (m *MainApp) RunApp() {
+	// Initialize the system tray
+	go func() {
+		systray.Run(m.setupTrayIcon, func() {
+			// Cleanup when systray exits
+		})
+	}()
+
 	m.win.Resize(fyne.NewSize(width, high))
 	m.win.CenterOnScreen()
+
+	// Set window close handler to minimize to tray instead of quitting
+	m.win.SetCloseIntercept(func() {
+		m.win.Hide()
+	})
+
 	m.win.ShowAndRun()
 }

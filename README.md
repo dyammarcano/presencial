@@ -1,6 +1,6 @@
-# Precencial - Controle de Presença Mensal
+# Presencial - Controle de Presença Mensal
 
-Este aplicativo em Python permite registrar se você esteve **presencial** em um determinado dia. Ele é ideal para o
+Este aplicativo em Go permite registrar se você esteve **presencial** em um determinado dia. Ele é ideal para o
 controle informal de frequência ou uso recorrente de atividades como reuniões ou medicação.
 
 ---
@@ -9,21 +9,23 @@ controle informal de frequência ou uso recorrente de atividades como reuniões 
 
 Ao executar, o programa irá:
 
-1. Criar automaticamente uma pasta `Precencial` no diretório do usuário
+1. Criar automaticamente uma pasta de dados no diretório do usuário
 2. Mostrar uma janela de diálogo perguntando sobre sua presença
 3. Exibir o total de presenças quando atingir a meta mensal
-4. Salvar o registro em um arquivo CSV
+4. Salvar o registro em um banco de dados SQLite
+5. Minimizar para a bandeja do sistema (tray icon)
 
 ---
 
 ## 🛠️ Funcionalidades
 
 - Mostra resumo mensal com total de presenças registradas
-- Permite configurar uma **meta mensal** (padrão: 8)
+- Permite configurar uma **meta mensal** (padrão: 4)
 - Armazena registros com **data, hora, resposta, observação e área**
 - Registro automático ao selecionar a área
-- Interface com fontes monoespaçadas para melhor legibilidade
-- Logs salvos localmente
+- Interface gráfica moderna com Fyne.io
+- Ícone na bandeja do sistema para acesso rápido
+- Importação e exportação de dados em formato JSON
 
 ---
 
@@ -31,28 +33,28 @@ Ao executar, o programa irá:
 
 Os dados são armazenados na pasta:
 
-- **Windows**: `C:\Usuários\SEU_USUARIO\Precencial\`
-- **Linux/macOS**: `/home/seu_usuario/Precencial/`
+- **Windows**: `C:\Users\SEU_USUARIO\AppData\Roaming\presencial\`
+- **macOS**: `/Users/seu_usuario/Library/Application Support/presencial/`
+- **Linux**: `/home/seu_usuario/.local/share/presencial/`
 
 ### Arquivos criados:
 
-| Arquivo                | Descrição                          |
-|------------------------|------------------------------------|
-| `registros.csv`        | Armazena todos os registros        |
-| `config.txt`           | Meta mensal definida pelo usuário  |
-| `presence_tracker.log` | Log de execução e erros do sistema |
+| Arquivo          | Descrição                                |
+|------------------|------------------------------------------|
+| `application.db` | Banco de dados SQLite com todos os dados |
+| `export_*.json`  | Arquivos de exportação de dados          |
 
 ---
 
 ## 🧾 Estrutura dos Dados
 
-Os registros são salvos em `~/Precencial/registros.csv` com as colunas:
+Os registros contêm as seguintes informações:
 
-- `data`: Data do registro (YYYY-MM-DD)
-- `hora`: Hora do registro (HH:MM:SS)
-- `resposta`: `"Sim"` ou `"Não"`
-- `observacao`: Campo adicional (ex: `"extra"`)
-- `area`: Área escolhida pelo usuário (AG, CT, CEIC, OUTRO)
+- `Date`: Data do registro (YYYY-MM-DD)
+- `Time`: Hora do registro (HH:MM:SS)
+- `Response`: `"Sim"` ou `"Não"`
+- `Observation`: Campo adicional (opcional)
+- `Area`: Área escolhida pelo usuário (AG, CT, CEIC, OUTRO)
 
 ---
 
@@ -61,9 +63,20 @@ Os registros são salvos em `~/Precencial/registros.csv` com as colunas:
 Na primeira execução, o programa solicitará:
 
 - A quantidade de dias presenciais desejada no mês (meta)
-- Isso será salvo automaticamente em `config.txt`
+- Isso será salvo automaticamente no banco de dados
 
-A meta mensal pode ser alterada manualmente ou reconfigurada deletando o arquivo `config.txt`.
+A meta mensal pode ser alterada a qualquer momento através do menu "Editar > Configurar Meta de Dias".
+
+---
+
+## 🔄 Importação e Exportação
+
+O aplicativo permite:
+
+- **Exportar dados**: Salva todos os registros em um arquivo JSON
+- **Importar dados**: Carrega registros de um arquivo JSON previamente exportado
+
+Acesse essas funções através do menu "Arquivo" ou do ícone na bandeja do sistema.
 
 ---
 
@@ -77,15 +90,29 @@ Este aplicativo é compatível com:
 
 Requisitos:
 
-- Python 3.7+
-- Módulos padrão: `tkinter`, `csv`, `enum`, `dataclasses`, `logging`
+- Go 1.24+ (para compilação)
+- Bibliotecas: Fyne.io, GORM, SQLite
 
 ---
 
-## 💡 Exemplo de Registro
+## 💡 Exemplo de Dados JSON
 
-```csv
-data,hora,resposta,observacao,area
-2025-05-01,08:45:12,Sim,,CT
-2025-05-02,08:47:30,Sim,extra,CEIC
-2025-05-03,08:50:03,Não,,N/A
+```json
+[
+  {
+    "ID": 1,
+    "Date": "2025-05-01",
+    "Time": "08:45:12",
+    "Response": "Sim",
+    "Observation": "",
+    "Area": "CT"
+  },
+  {
+    "ID": 2,
+    "Date": "2025-05-02",
+    "Time": "08:47:30",
+    "Response": "Sim",
+    "Observation": "extra",
+    "Area": "CEIC"
+  }
+]
