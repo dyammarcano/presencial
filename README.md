@@ -1,33 +1,126 @@
+# Presencial - Controle de Presença Mensal
 
-O programa irá:
-1. Criar automaticamente uma pasta "Precencial" no diretório do usuário
+Este aplicativo em Go permite registrar se você esteve **presencial** em um determinado dia. Ele é ideal para o
+controle informal de frequência ou uso recorrente de atividades como reuniões ou medicação.
+
+---
+
+## 🚀 O que o programa faz?
+
+Ao executar, o programa irá:
+
+1. Criar automaticamente uma pasta de dados no diretório do usuário
 2. Mostrar uma janela de diálogo perguntando sobre sua presença
 3. Exibir o total de presenças quando atingir a meta mensal
-4. Salvar o registro em um arquivo CSV
+4. Salvar o registro em um banco de dados SQLite
+5. Minimizar para a bandeja do sistema (tray icon)
 
-## Estrutura dos Dados
+---
 
-Os registros são salvos em `~/Precencial/registros.csv` com as seguintes colunas:
-- data: Data do registro (YYYY-MM-DD)
-- hora: Hora do registro (HH:MM:SS)
-- resposta: "Sim" ou "Não"
-- observacao: Campo adicional para registros extras
+## 🛠️ Funcionalidades
 
-## Configuração
+- Mostra resumo mensal com total de presenças registradas
+- Permite configurar uma **meta mensal** (padrão: 4)
+- Armazena registros com **data, hora, resposta, observação e área**
+- Registro automático ao selecionar a área
+- Interface gráfica moderna com Fyne.io
+- Ícone na bandeja do sistema para acesso rápido
+- Importação e exportação de dados em formato JSON
 
-A meta mensal está definida como 8 presenças e pode ser ajustada modificando a variável `meta_mensal` no código.
+---
 
-## Suporte
+## 📂 Onde os arquivos são salvos?
 
-O sistema é compatível com:
-- Windows
-- Linux
-- macOS
+Os dados são armazenados na pasta:
 
-## Contribuição
+- **Windows**: `C:\Users\SEU_USUARIO\AppData\Roaming\presencial\`
+- **macOS**: `/Users/seu_usuario/Library/Application Support/presencial/`
+- **Linux**: `/home/seu_usuario/.local/share/presencial/`
 
-Para contribuir com o projeto:
-1. Faça um fork do repositório
-2. Crie uma branch para sua feature
-3. Envie suas alterações com commits descritivos
-4. Abra um Pull Request
+### Arquivos criados:
+
+| Arquivo          | Descrição                                |
+|------------------|------------------------------------------|
+| `application.db` | Banco de dados SQLite com todos os dados |
+| `export_*.json`  | Arquivos de exportação de dados          |
+
+---
+
+## 🧾 Estrutura dos Dados
+
+Os registros contêm as seguintes informações:
+
+- `Date`: Data do registro (YYYY-MM-DD)
+- `Time`: Hora do registro (HH:MM:SS)
+- `Response`: `"Sim"` ou `"Não"`
+- `Observation`: Campo adicional (opcional)
+- `Area`: Área escolhida pelo usuário (AG, CT, CEIC, OUTRO)
+
+---
+
+## ⚙️ Configuração
+
+Na primeira execução, o programa solicitará:
+
+- A quantidade de dias presenciais desejada no mês (meta)
+- Isso será salvo automaticamente no banco de dados
+
+A meta mensal pode ser alterada a qualquer momento através do menu "Editar > Configurar Meta de Dias".
+
+---
+
+## 🔄 Importação e Exportação
+
+O aplicativo permite:
+
+- **Exportar dados**: Salva todos os registros em um arquivo JSON
+- **Importar dados**: Carrega registros de um arquivo JSON previamente exportado
+
+Acesse essas funções através do menu "Arquivo" ou do ícone na bandeja do sistema.
+
+---
+
+## 🖥️ Compatibilidade
+
+Este aplicativo é compatível com:
+
+- ✅ Windows
+- ✅ Linux
+- ✅ macOS
+
+Requisitos:
+
+- Go 1.23.0+ (para compilação)
+- Bibliotecas: Fyne.io, GORM, SQLite
+
+## 🔄 Integração Contínua
+
+O projeto utiliza GitHub Actions para integração contínua:
+
+- Builds automáticos na branch `develop`
+- Testes em ambientes Windows e Linux
+- Verificação de qualidade de código com golangci-lint
+
+---
+
+## 💡 Exemplo de Dados JSON
+
+```json
+[
+  {
+    "ID": 1,
+    "Date": "2025-05-01",
+    "Time": "08:45:12",
+    "Response": "Sim",
+    "Observation": "",
+    "Area": "CT"
+  },
+  {
+    "ID": 2,
+    "Date": "2025-05-02",
+    "Time": "08:47:30",
+    "Response": "Sim",
+    "Observation": "extra",
+    "Area": "CEIC"
+  }
+]
