@@ -93,6 +93,14 @@ Requisitos:
 - Go 1.23.0+ (para compilação)
 - Bibliotecas: Fyne.io, GORM, SQLite
 
+## 🔄 Integração Contínua
+
+O projeto utiliza GitHub Actions para integração contínua:
+
+- Builds automáticos na branch `develop`
+- Testes em ambientes Windows e Linux
+- Verificação de qualidade de código com golangci-lint
+
 ---
 
 ## 💡 Exemplo de Dados JSON
