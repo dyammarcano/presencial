@@ -9,6 +9,4 @@ linters:
     - staticcheck
     - errcheck
     - revive
-    - gosimple
     - unused
-    - structcheck
